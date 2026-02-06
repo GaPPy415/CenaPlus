@@ -99,15 +99,15 @@ def bulk_upsert(db, collection: str, products: list, key_field: str = 'name'):
     print(f"Bulk upsert: {result.upserted_count} inserted, {result.modified_count} modified")
     return result
 
-def save_products(db, collection: str, products_to_upsert: list, products_to_insert: list, all_products: dict):
+def save_products(db, collection: str, products_to_insert: list, products_to_upsert: list, all_products: dict):
     """
     Save products to MongoDB with bulk operations and mark out of stock.
 
     Args:
         db: MongoDB database object
         collection: Collection name
-        products_to_upsert: List of products to upsert
         products_to_insert: List of products to insert
+        products_to_upsert: List of products to upsert
         all_products: Dict of all scraped products (to mark out of stock)
     """
     save_start = time.time()

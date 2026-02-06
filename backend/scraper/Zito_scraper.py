@@ -65,7 +65,6 @@ asyncio.run(fetch_all_products())
 
 print(f"Total products fetched: {len(all_products)}")
 print(f"Execution time: {round(time.time() - start, 3)} seconds")
-save = time.time()
 
 # Export all_products to mongodb database
 collection = "zito_products"

@@ -149,7 +149,6 @@ def main():
 
         logger.info(f"Done scraping in {round(time.time() - start, 3)} seconds")
 
-        start = time.time()
 
         collection = "reptil_products"
         db = connect_to_db(collection)
@@ -179,7 +178,7 @@ def main():
             product = db[f"{collection}"].find_one({'name': key})
             handle_product(products_to_insert, products_to_upsert, names_ids, fields)
 
-        save_products(db, collection, products_to_upsert, products_to_insert, all_products)
+        save_products(db, collection, products_to_insert, products_to_upsert, all_products)
         print(f"Overall done in {round(time.time() - start, 2)}s")
 
         return all_products

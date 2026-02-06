@@ -98,7 +98,6 @@ def main():
     print(f"\nTotal unique products: {len(products)}")
     print(f"Scraping took {round(time.time() - start, 2)}s")
     print("Saving to MongoDB vero_products collection")
-    save = time.time()
     collection = "vero_products"
     db = connect_to_db(collection)
     products_to_insert = []
@@ -122,7 +121,7 @@ def main():
         fields['in_stock'] = value[3]
         handle_product(products_to_insert, products_to_upsert, names_ids, fields)
 
-    save_products(db, collection, products_to_upsert, products_to_insert, products)
+    save_products(db, collection, products_to_insert, products_to_upsert, products)
     print(f"Overall done in {round(time.time() - start, 2)}s")
 
 if __name__ == "__main__":

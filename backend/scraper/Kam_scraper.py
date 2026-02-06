@@ -167,7 +167,6 @@ if __name__ == "__main__":
 
     print(f"Total products: {len(all_products)} in {round(time.time() - start, 2)}s")
     print("Saving to MongoDB kam_products collection")
-    start = time.time()
 
     collection = "kam_products"
     db = connect_to_db(collection)
@@ -190,5 +189,5 @@ if __name__ == "__main__":
         fields['in_stock'] = 1
         handle_product(products_to_insert, products_to_upsert, names_ids, fields)
 
-    save_products(db, collection, products_to_upsert, products_to_insert, all_products)
+    save_products(db, collection, products_to_insert, products_to_upsert, all_products)
     print(f"Overall done in {round(time.time() - start, 2)}s")
