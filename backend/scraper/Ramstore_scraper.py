@@ -54,6 +54,10 @@ for store in tqdm(stores):
     df_new = pd.read_html(store)[0]
     df_new["storeId"] = store_id
 
+    if df_new.empty:
+        print(f"No data found for store: {store}")
+        continue
+
     df_new[['promotionDateFrom', 'promotionDateTo']] = df_new['ВРЕМЕТРАЕЊЕ НА АКЦИЈА'].apply(
         lambda x: pd.Series(extract_dates(x))
     )

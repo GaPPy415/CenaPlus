@@ -10,15 +10,15 @@ class RateLimiter:
     Tracks requests per minute (RPM) and tokens per minute (TPM).
     """
 
-    def __init__(self, rpm_limit: int = 480, tpm_limit: int = 480000):
+    def __init__(self, rpm_limit: int = 1900, tpm_limit: int = 3800000):
         """
         Initialize rate limiter with conservative limits.
 
-        GPT-5.1 free tier:
-        - 500 RPM
-        - 500,000 TPM
+        Gemini 2.0 Flash tier 1:
+        - 2,000 RPM
+        - 4,000,000 TPM
 
-        We use 480/180k to leave a safety buffer.
+        We use 1900/3.8m to leave a safety buffer.
         """
         self.rpm_limit = rpm_limit
         self.tpm_limit = tpm_limit

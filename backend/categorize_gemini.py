@@ -1,31 +1,18 @@
 import asyncio
 import time
 import os
-from collections import deque
-from typing import List, Optional, Tuple
-from datetime import datetime
-
+from typing import List, Optional
 from dotenv import load_dotenv, find_dotenv
 from pydantic import BaseModel, Field
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
+from google import genai
+import json
 
-try:
-    import tiktoken
-
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
-    print("⚠️  tiktoken not installed. Token estimation will be approximate.")
-    print("   Install with: pip install tiktoken")
+from backend.RateLimiter import RateLimiter
+from backend.db_utils import load_products_to_categorize, save_categorizations_to_db
 
 from backend.db_utils import connect_to_db
 
 load_dotenv(find_dotenv())
-
-# ============================================================================
-# CATEGORIES TAXONOMY
-# ============================================================================
 
 CATEGORIES = {
     "Намирници": ['Брашно', 'Додатоци за јадења', 'Додатоци за конзервирање', 'Готови оброци', 'Јајца',
@@ -43,7 +30,7 @@ CATEGORIES = {
     "Месо и риба": ['Колбаси', 'Конзервирани производи', 'Намази', 'Паштета', 'Сувомеснато и процесирано месо',
                     'Салама', 'На тенки парчиња', 'Свежа риба', 'Свежо месо', 'Виршли и колбасици'],
     "Замрзнато": ['Готови сладоледи', 'Риба и морска храна', 'Замрзнат зеленчук', 'Замрзнато тесто и пецива',
-                  'Замрзнато овошје', 'Замрзнато месо'],
+                  'Замрзнато овошје', 'Замрзнато месо', 'Пици', 'Готови оброци'],
     "Пијалоци": ['Вода', 'Кафе', 'Газирани сокови', 'Капсули за кафе', 'Енергетски пијалоци', 'Чаеви', 'Ладени чаеви',
                  'Негазирани сокови'],
     "Алкохолни пијалоци": ['Пиво', 'Јаки алкохолни пијалоци', 'Вино', 'Витамински пијалоци', 'Квас', 'Коктел',
@@ -62,24 +49,19 @@ CATEGORIES = {
                        'Средства за чистење', 'Средства за чистење на домаќинство', 'Средства за чистење на санитарии',
                        'Нега на обувки', 'Освежувачи на тоалет', 'Опрема за чистење'],
     "Катче за бебиња": ['Детска хигиена', 'Храна за бебиња', 'Каша за деца', 'Пијалоци', 'Пелени',
-                        'Замена за млеко за деца'],
+                        'Замена за млеко за деца', 'Играчки'],
     "Домашни миленици": ['Антипаразитски лекови', 'Влажна храна за мачки', 'Влажна храна за кучиња', 'Грицки за мачки',
-                         'Грицки за кучиња', 'Сува храна за мачки', 'Сува храна за кучиња'],
-    "Дом и градина": ['Кујнски прибор и садови', 'Сијалици', 'Батерии', 'Супер лепак', 'Чепкалки за заби', 'Свеќи'],
+                         'Грицки за кучиња', 'Сува храна за мачки', 'Сува храна за кучиња', 'Играчки за миленици', 'Останато'],
+    "Дом и градина": ['Салфети', 'Кујнски прибор и садови', 'Сијалици', 'Батерии', 'Супер лепак', 'Чепкалки за заби', 'Свеќи'],
     "Цигари": ['Цигари и никотински производи'],
-    "Разно": ['Останато']
+    "Облека": ['Облека за жени', 'Облека за мажи', 'Облека за деца', 'Чорапи и хулахопки', 'Пижами и долна облека'],
+    "Разно": ['Останато', 'Плажа и базен', 'Канцелариски материјал', 'Текстил за дома', 'Кеси и фолија']
 }
 
-# Compressed taxonomy for prompts (saves ~40% tokens)
 TAXONOMY_COMPRESSED = "\n".join([
     f"{main}: {', '.join(subs)}"
     for main, subs in CATEGORIES.items()
 ])
-
-
-# ============================================================================
-# PYDANTIC MODELS
-# ============================================================================
 
 class ProductCategory(BaseModel):
     """Single product categorization."""
@@ -88,140 +70,20 @@ class ProductCategory(BaseModel):
     confidence: float = Field(description="Confidence 0.0-1.0", ge=0.0, le=1.0)
     reasoning: Optional[str] = Field(default=None, description="Brief explanation")
 
-
 class BatchProductCategories(BaseModel):
     """Multiple product categorizations in a single response."""
     products: List[ProductCategory] = Field(description="List of categorizations in order")
 
-
-# ============================================================================
-# RATE LIMITER
-# ============================================================================
-
-class RateLimiter:
-    """
-    Token-aware rate limiter for API calls.
-    Tracks requests per minute (RPM) and tokens per minute (TPM).
-    """
-
-    def __init__(self, rpm_limit: int = 14, tpm_limit: int = 950000):
-        """
-        Initialize rate limiter with conservative limits.
-
-        Gemini 2.0 Flash free tier:
-        - 1500 RPM
-        - 1,000,000 TPM
-
-        We use 1400/950k to leave a safety buffer.
-        """
-        self.rpm_limit = rpm_limit
-        self.tpm_limit = tpm_limit
-
-        self.request_times = deque()  # Timestamps of requests
-        self.token_times = deque()  # (timestamp, token_count) tuples
-
-        self.lock = asyncio.Lock()
-        self.total_requests = 0
-        self.total_tokens = 0
-
-    def _clean_old_entries(self):
-        """Remove entries older than 60 seconds."""
-        cutoff = time.time() - 60
-
-        while self.request_times and self.request_times[0] < cutoff:
-            self.request_times.popleft()
-
-        while self.token_times and self.token_times[0][0] < cutoff:
-            self.token_times.popleft()
-
-    def _get_current_usage(self) -> Tuple[int, int]:
-        """Get current RPM and TPM usage in the last 60 seconds."""
-        self._clean_old_entries()
-        rpm_used = len(self.request_times)
-        tpm_used = sum(tokens for _, tokens in self.token_times)
-        return rpm_used, tpm_used
-
-    async def acquire(self, estimated_tokens: int):
-        """
-        Wait until we can make a request without exceeding rate limits.
-
-        Args:
-            estimated_tokens: Estimated tokens for the upcoming request
-        """
-        async with self.lock:
-            while True:
-                rpm_used, tpm_used = self._get_current_usage()
-
-                # Check if we can make this request
-                if (rpm_used < self.rpm_limit and
-                        tpm_used + estimated_tokens < self.tpm_limit):
-                    # Record this request
-                    now = time.time()
-                    self.request_times.append(now)
-                    self.token_times.append((now, estimated_tokens))
-
-                    self.total_requests += 1
-                    self.total_tokens += estimated_tokens
-                    return
-
-                # Calculate wait time
-                wait_time = 1.0
-
-                if rpm_used >= self.rpm_limit and self.request_times:
-                    oldest = self.request_times[0]
-                    wait_time = max(wait_time, 60 - (time.time() - oldest) + 0.2)
-
-                if tpm_used + estimated_tokens >= self.tpm_limit and self.token_times:
-                    oldest_token_time = self.token_times[0][0]
-                    wait_time = max(wait_time, 60 - (time.time() - oldest_token_time) + 0.2)
-
-                print(f"⏳ Rate limit: RPM {rpm_used}/{self.rpm_limit}, "
-                      f"TPM {tpm_used:,}/{self.tpm_limit:,}. "
-                      f"Waiting {wait_time:.1f}s...")
-                await asyncio.sleep(wait_time)
-
-    def get_stats(self) -> dict:
-        """Get usage statistics."""
-        rpm_used, tpm_used = self._get_current_usage()
-        return {
-            'total_requests': self.total_requests,
-            'total_tokens': self.total_tokens,
-            'current_rpm': rpm_used,
-            'current_tpm': tpm_used,
-            'rpm_limit': self.rpm_limit,
-            'tpm_limit': self.tpm_limit
-        }
-
-
-# Global rate limiter instance
-rate_limiter = RateLimiter()
-
-
-# ============================================================================
-# TOKEN ESTIMATION
-# ============================================================================
+rate_limiter = RateLimiter(rpm_limit=1900, tpm_limit=3800000)
 
 def estimate_tokens(products: List[dict]) -> int:
     """
     Estimate tokens for a batch of products.
-
-    Args:
-        products: List of product dicts with 'name', 'description', 'existing_categories'
-
-    Returns:
-        Estimated total tokens (input + output)
+    Approximation: 1 token ≈ 4 characters for Macedonian text.
     """
-    if TIKTOKEN_AVAILABLE:
-        try:
-            encoding = tiktoken.get_encoding("cl100k_base")
-        except:
-            encoding = None
-    else:
-        encoding = None
-
-    # System prompt + taxonomy (approximately constant)
-    system_tokens = 350  # System prompt
-    taxonomy_tokens = 800  # Compressed taxonomy
+    # System prompt + taxonomy
+    system_tokens = 350
+    taxonomy_tokens = 800
 
     # User content for all products
     user_content = "\n\n".join([
@@ -231,33 +93,18 @@ def estimate_tokens(products: List[dict]) -> int:
         for i, p in enumerate(products)
     ])
 
-    if encoding:
-        user_tokens = len(encoding.encode(user_content))
-    else:
-        # Rough approximation: 1 token ≈ 4 characters for Macedonian
-        user_tokens = len(user_content) // 4
-
-    # Output tokens: ~100 per product (category info + reasoning)
+    user_tokens = len(user_content) // 4
     output_tokens = len(products) * 100
 
-    total = system_tokens + taxonomy_tokens + user_tokens + output_tokens
+    return system_tokens + taxonomy_tokens + user_tokens + output_tokens
 
-    return total
-
-
-# ============================================================================
-# PROMPT TEMPLATES
-# ============================================================================
-
-def create_batch_prompt() -> ChatPromptTemplate:
-    """Create optimized prompt for batch categorization."""
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are a product categorization expert for Macedonian supermarkets.
+def create_system_prompt() -> str:
+    """Create system prompt for batch categorization."""
+    return f"""You are a product categorization expert for Macedonian supermarkets.
 
 Categorize ALL products below into ONE main category and ONE subcategory from this taxonomy:
 
-{taxonomy}
+{TAXONOMY_COMPRESSED}
 
 RULES:
 1. Choose most specific and relevant category
@@ -270,35 +117,38 @@ RULES:
 4. Subcategory MUST belong to chosen main category
 5. Return categorizations IN THE SAME ORDER as input products
 
-Keep reasoning brief (1 sentence)."""),
+Keep reasoning brief (1 sentence).
 
-        ("user", """{products_text}
+IMPORTANT: You MUST return a valid JSON object with this EXACT structure:
+{{
+  "products": [
+    {{
+      "main_category": "category name from taxonomy",
+      "sub_category": "subcategory name from taxonomy",
+      "confidence": 0.95,
+      "reasoning": "brief explanation"
+    }}
+  ]
+}}
 
-Return a JSON object with a "products" array containing categorizations for ALL products above, in order.""")
-    ])
-
-    return prompt
-
-
-# ============================================================================
-# CATEGORIZATION FUNCTIONS
-# ============================================================================
+ALL fields (main_category, sub_category, confidence, reasoning) are REQUIRED for each product."""
 
 async def categorize_batch_gemini(
         products_chunk: List[dict],
-        google_api_key: str
+        client: genai.Client,
+        model_id: str
 ) -> List[ProductCategory]:
     """
     Categorize a batch of products using Gemini 2.0 Flash.
 
     Args:
-        products_chunk: List of 3-8 products to categorize in one request
-        google_api_key: Google API key
+        products_chunk: List of products to categorize in one request
+        client: Configured Gemini client
+        model_id: Model identifier
 
     Returns:
         List of ProductCategory objects
     """
-    # Build products text
     products_text = "\n\n".join([
         f"Product {i + 1}:\n"
         f"Name: {p.get('name', '')}\n"
@@ -307,27 +157,36 @@ async def categorize_batch_gemini(
         for i, p in enumerate(products_chunk)
     ])
 
-    # Initialize Gemini
-    llm = ChatGoogleGenerativeAI(
-        model="models/gemini-2.0-flash",  # Change this line
-        temperature=0.1,
-        google_api_key=google_api_key,
-        max_retries=2
-    )
-
-    # Bind structured output
-    structured_llm = llm.with_structured_output(BatchProductCategories)
-
-    # Create chain
-    prompt = create_batch_prompt()
-    chain = prompt | structured_llm
+    prompt = f"{create_system_prompt()}\n\n{products_text}"
 
     try:
-        # Invoke
-        result = await chain.ainvoke({
-            "taxonomy": TAXONOMY_COMPRESSED,
-            "products_text": products_text
-        })
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=model_id,
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(
+                temperature=0.1,
+                response_mime_type="application/json"
+            )
+        )
+
+        # Parse JSON response
+        result_data = json.loads(response.text)
+
+        # Fix any products missing required fields
+        if "products" in result_data:
+            for product_dict in result_data["products"]:
+                if "sub_category" not in product_dict:
+                    product_dict["sub_category"] = "Останато"
+                if "confidence" not in product_dict:
+                    product_dict["confidence"] = 0.5
+                if "reasoning" not in product_dict:
+                    product_dict["reasoning"] = "Auto-filled missing field"
+                if "main_category" not in product_dict:
+                    product_dict["main_category"] = "Разно"
+
+        # Parse into Pydantic models
+        result = BatchProductCategories(**result_data)
 
         # Validate we got the right number of results
         if len(result.products) != len(products_chunk):
@@ -342,11 +201,27 @@ async def categorize_batch_gemini(
                     reasoning="Missing from batch response"
                 ))
 
-        return result.products[:len(products_chunk)]  # Ensure exact match
+        return result.products[:len(products_chunk)]
 
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON parse error: {e}")
+        try:
+            print(f"Response text: {response.text[:500]}")
+        except:
+            print("Response not available")
+        return [
+            ProductCategory(
+                main_category="Разно",
+                sub_category="Останато",
+                confidence=0.0,
+                reasoning=f"JSON parse error: {str(e)}"
+            )
+            for _ in products_chunk
+        ]
     except Exception as e:
         print(f"❌ Batch error: {e}")
-        # Return error categorizations for all products in batch
+        import traceback
+        traceback.print_exc()
         return [
             ProductCategory(
                 main_category="Разно",
@@ -360,28 +235,33 @@ async def categorize_batch_gemini(
 
 async def categorize_all_products(
         products: List[dict],
-        batch_size: int = 5,
-        concurrency: int = 3,
-        google_api_key: str = None
+        batch_size: int = 32,
+        concurrency: int = 1,
+        gemini_api_key: str = None
 ) -> List[dict]:
     """
     Categorize all products with batching and rate limiting.
 
     Args:
         products: List of product dicts
-        batch_size: Number of products per API request (3-8 recommended)
-        concurrency: Number of concurrent batches (10-20 recommended)
-        google_api_key: Google API key (or set GOOGLE_API_KEY env var)
+        batch_size: Number of products per API request
+        concurrency: Number of concurrent batches (2-3 recommended for tier 1)
+        gemini_api_key: Google API key (or set GOOGLE_API_KEY env var)
 
     Returns:
         List of products with 'categorization' field added
     """
-    if not google_api_key:
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
+    if not gemini_api_key:
+        gemini_api_key = os.getenv("GOOGLE_API_KEY")
+        if not gemini_api_key:
             raise ValueError("GOOGLE_API_KEY not found in environment or arguments")
 
+    # Configure Gemini client
+    client = genai.Client(api_key=gemini_api_key)
+    model_id = 'gemini-2.0-flash'
+
     print(f"🚀 Starting categorization of {len(products)} products")
+    print(f"   Model: Gemini 2.0 Flash")
     print(f"   Batch size: {batch_size} products/request")
     print(f"   Concurrency: {concurrency} concurrent batches")
     print(f"   Estimated requests: {len(products) // batch_size + 1}")
@@ -408,7 +288,7 @@ async def categorize_all_products(
             await rate_limiter.acquire(estimated_tokens)
 
             # Categorize batch
-            categorizations = await categorize_batch_gemini(batch, google_api_key)
+            categorizations = await categorize_batch_gemini(batch, client, model_id)
 
             # Assign results
             for product, cat in zip(batch, categorizations):
@@ -446,158 +326,27 @@ async def categorize_all_products(
     print(f"   Average rate: {len(products) / elapsed:.1f} products/sec")
     print(f"   Total API requests: {stats['total_requests']:,}")
     print(f"   Total tokens used: {stats['total_tokens']:,}")
-    print(f"   Estimated cost: $0.00 (Gemini free tier)")
     print("=" * 70)
 
     return products
 
 
-# ============================================================================
-# DATABASE INTEGRATION
-# ============================================================================
-
-def load_products_from_db(db, limit_per_collection: int = None) -> Tuple[List[dict], dict]:
-    """
-    Load products from MongoDB that need categorization.
-
-    Args:
-        db: MongoDB database object
-        limit_per_collection: Max products per collection (None = all)
-
-    Returns:
-        (products_list, products_to_markets_mapping)
-    """
-    products = []
-    products_markets = {}
-
-    collections = [c for c in db.list_collection_names() if c != 'products_categorized' and c!= 'all_products']
-
-    print(f"📂 Loading products from {len(collections)} collections...")
-
-    for collection in collections:
-        query = {}
-        cursor = db[collection].find(query)
-
-        if limit_per_collection:
-            cursor = cursor.limit(limit_per_collection)
-
-        collection_count = 0
-
-        for product in cursor:
-            # Check if already categorized
-            existing = db['products_categorized'].find_one({'_id': product['_id']})
-            if existing and existing.get('categorization', {}).get('main_category'):
-                continue  # Skip already categorized
-
-            # Extract description from various possible fields
-            description = ""
-            for field in ['description', 'category', 'categories']:
-                if field in product:
-                    desc_value = product[field]
-                    if isinstance(desc_value, list):
-                        description = ", ".join(str(x) for x in desc_value)
-                    else:
-                        description = str(desc_value)
-                    break
-
-            # Create normalized product
-            new_product = {
-                '_id': product.get('_id', ''),
-                'name': product.get('name', ''),
-                'description': description,
-                'existing_categories': description  # Use same field for existing categories
-            }
-
-            products.append(new_product)
-            products_markets[product['_id']] = collection
-            collection_count += 1
-
-        print(f"   {collection}: {collection_count} products")
-
-    print(f"📊 Total products to categorize: {len(products)}")
-    return products, products_markets
-
-
-def save_categorizations_to_db(db, products: List[dict], products_markets: dict):
-    """
-    Save categorized products to MongoDB.
-
-    Args:
-        db: MongoDB database object
-        products: List of categorized products
-        products_markets: Mapping of product_id to source market
-    """
-    print(f"\n💾 Saving {len(products)} categorizations to database...")
-
-    to_insert = []
-    updated_count = 0
-
-    for product in products:
-        product['market'] = products_markets.get(product['_id'], 'unknown')
-        product['categorized_at'] = datetime.utcnow()
-
-        # Try to update existing
-        result = db['products_categorized'].update_one(
-            {'_id': product['_id']},
-            {'$set': {
-                'categorization': product['categorization'],
-                'categorized_at': product['categorized_at']
-            }},
-            upsert=False
-        )
-
-        if result.matched_count > 0:
-            updated_count += 1
-        else:
-            to_insert.append(product)
-
-    # Bulk insert new ones
-    if to_insert:
-        if len(to_insert) == 1:
-            db['products_categorized'].insert_one(to_insert[0])
-        else:
-            db['products_categorized'].insert_many(to_insert)
-
-    print(f"   Updated: {updated_count}")
-    print(f"   Inserted: {len(to_insert)}")
-    print(f"   Total saved: {len(products)}")
-
-
-# ============================================================================
-# MAIN
-# ============================================================================
-
 async def main():
     """Main execution function."""
 
     # Check for Google API key
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    if not google_api_key:
-        print("=" * 70)
+    gemini_api_key = os.getenv("GOOGLE_API_KEY")
+    if not gemini_api_key:
         print("❌ ERROR: GOOGLE_API_KEY not found!")
-        print()
-        print("To get a Google API key:")
-        print("1. Go to: https://aistudio.google.com/app/apikey")
-        print("2. Click 'Create API Key'")
-        print("3. Add to your .env file:")
-        print("   GOOGLE_API_KEY=your_key_here")
-        print("=" * 70)
         return
-
-    print("=" * 70)
-    print("🤖 Product Categorization System")
-    print("=" * 70)
-    print()
 
     # Connect to database
     db = connect_to_db('products_categorized')
 
     # Load products
-    # For testing: limit_per_collection=50
-    # For production: limit_per_collection=None
-    products, products_markets = load_products_from_db(
+    products, products_markets = load_products_to_categorize(
         db,
-        limit_per_collection=50  # Remove this or set to None for all products
+        limit_per_collection=None
     )
 
     if not products:
@@ -608,9 +357,9 @@ async def main():
     # Categorize all products
     categorized_products = await categorize_all_products(
         products,
-        batch_size=5,  # 5 products per request (optimal for Gemini)
-        concurrency=3,  # 3 concurrent batches
-        google_api_key=google_api_key
+        batch_size=16,
+        concurrency=32,
+        gemini_api_key=gemini_api_key
     )
 
     # Save to database
@@ -645,7 +394,7 @@ async def main():
 
     # Show some examples
     print("\n📋 Sample categorizations:")
-    for i, p in enumerate(categorized_products[:5]):
+    for i, p in enumerate(categorized_products[:20]):
         cat = p['categorization']
         print(f"\n{i + 1}. {p['name'][:60]}")
         print(f"   → {cat['main_category']} / {cat['sub_category']}")

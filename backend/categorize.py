@@ -3,15 +3,10 @@ import time
 import json
 from typing import List, Optional, Tuple
 from datetime import datetime
-
 from pydantic import BaseModel, Field
 import ollama
-
 from backend.db_utils import connect_to_db
 
-# ============================================================================
-# CATEGORIES TAXONOMY
-# ============================================================================
 
 CATEGORIES = {
     "Намирници": ['Брашно', 'Додатоци за јадења', 'Додатоци за конзервирање', 'Готови оброци', 'Јајца',
@@ -41,7 +36,7 @@ CATEGORIES = {
                         'Диетални и здрави слатки'],
     "Лична хигиена и козметика": ['Сапуни', 'Чистење на лицето', 'Бричеви', 'Боја за коса',
                                   'Гелови за туширање', 'Хигиена за жени', 'Дезодоранси', 'Нега за коса',
-                                  'Нега на лице', 'Нега на раце', 'Нега на стапала', 'Нега за тело',
+                                  'Нега на лице', 'Нега на раце', 'Нега на стапала', 'Нега на тело',
                                   'Орална хигиена', 'Хартија конфекција', 'Препарати за сончање',
                                   'Стик и рол-он', 'Сетови за поклон', 'Лабело', 'Производи за бричење',
                                   'Стапчиња за уши', 'Кондоми', 'Парфеми'],
@@ -67,29 +62,34 @@ TAXONOMY_COMPRESSED = "\n".join([
     for main, subs in CATEGORIES.items()
 ])
 
+OLLAMA_MODEL = "mkllm-7b-q5"  # Your local model name
 
 # ============================================================================
 # PYDANTIC MODELS
 # ============================================================================
 
-class ProductCategory(BaseModel):
-    """Single product categorization."""
+class ProductMainCategory(BaseModel):
+    """Single product main category categorization."""
     main_category: str = Field(description="Main category from taxonomy")
+    confidence: float = Field(description="Confidence 0.0-1.0", ge=0.0, le=1.0)
+    reasoning: Optional[str] = Field(default=None, description="Brief explanation")
+
+
+class ProductSubCategory(BaseModel):
+    """Single product subcategory categorization."""
     sub_category: str = Field(description="Subcategory belonging to main category")
     confidence: float = Field(description="Confidence 0.0-1.0", ge=0.0, le=1.0)
     reasoning: Optional[str] = Field(default=None, description="Brief explanation")
 
 
-class BatchProductCategories(BaseModel):
-    """Multiple product categorizations in a single response."""
-    products: List[ProductCategory] = Field(description="List of categorizations in order")
-
-
-# ============================================================================
-# OLLAMA CONFIGURATION
-# ============================================================================
-
-OLLAMA_MODEL = "categorizer"  # Your local model name
+class ProductCategory(BaseModel):
+    """Complete product categorization."""
+    main_category: str = Field(description="Main category from taxonomy")
+    sub_category: str = Field(description="Subcategory belonging to main category")
+    main_confidence: float = Field(description="Main category confidence 0.0-1.0", ge=0.0, le=1.0)
+    sub_confidence: float = Field(description="Subcategory confidence 0.0-1.0", ge=0.0, le=1.0)
+    main_reasoning: Optional[str] = Field(default=None, description="Main category reasoning")
+    sub_reasoning: Optional[str] = Field(default=None, description="Subcategory reasoning")
 
 
 def get_ollama_client() -> ollama.Client:
@@ -97,44 +97,72 @@ def get_ollama_client() -> ollama.Client:
     return ollama.Client()
 
 
-# ============================================================================
-# CATEGORIZATION FUNCTIONS
-# ============================================================================
+def build_main_category_prompt() -> str:
+    """Build the system prompt for main category categorization."""
+    main_categories = ", ".join(CATEGORIES.keys())
+    return f"""Ти си експерт за категоризација на производи во македонски супермаркети.
 
-def build_system_prompt() -> str:
-    """Build the system prompt for categorization."""
-    return f"""You are a product categorization expert for Macedonian supermarkets.
+Категоризирај ги производите во ЕДНА главна категорија од оваа листа:
 
-Categorize products into ONE main category and ONE subcategory from this taxonomy:
+{main_categories}
 
-{TAXONOMY_COMPRESSED}
+ПРАВИЛА:
+1. Избери ја најспецифичната и најрелевантната главна категорија
+2. Ако повеќе категории одговараат, избери ја примарната намена
+3. Оценување на доверба:
+   - 0.9-1.0: Јасно совпаѓање
+   - 0.7-0.89: Добро совпаѓање, мала нејаснотија
+   - 0.5-0.69: Повеќе опции, избрана најверојатна
+   - <0.5: Несигурно, потребна проверка
+4. Образложението треба да биде кратко (1 реченица)
 
-RULES:
-1. Choose most specific and relevant category
-2. If multiple categories fit, choose primary use case
-3. Confidence scoring:
-   - 0.9-1.0: Clear match
-   - 0.7-0.89: Good match, minor ambiguity
-   - 0.5-0.69: Multiple options, chose most likely
-   - <0.5: Uncertain, needs review
-4. Subcategory MUST belong to chosen main category
-5. Keep reasoning brief (1 sentence)
-
-Respond ONLY with valid JSON matching this schema:
+ВАЖНО: Одговорот МОРА да биде валиден JSON во овој формат:
 {{
   "main_category": "string",
-  "sub_category": "string", 
   "confidence": 0.0-1.0,
   "reasoning": "string"
-}}"""
+}}
+
+МОРА да избереш категорија САМО од горната листа. Не измислувај нови категории."""
 
 
-def categorize_single_product_ollama(
+def build_sub_category_prompt(main_category: str) -> str:
+    """Build the system prompt for subcategory categorization."""
+    subcategories = ", ".join(CATEGORIES.get(main_category, []))
+    return f"""Ти си експерт за категоризација на производи во македонски супермаркети.
+
+Производот веќе е категоризиран во главната категорија: {main_category}
+
+Сега категоризирај го во ЕДНА подкатегорија од оваа листа:
+
+{subcategories}
+
+ПРАВИЛА:
+1. Избери ја најспецифичната и најрелевантната подкатегорија
+2. Ако повеќе подкатегории одговараат, избери ја примарната намена
+3. Оценување на доверба:
+   - 0.9-1.0: Јасно совпаѓање
+   - 0.7-0.89: Добро совпаѓање, мала нејаснотија
+   - 0.5-0.69: Повеќе опции, избрана најверојатна
+   - <0.5: Несигурно, потребна проверка
+4. Образложението треба да биде кратко (1 реченица)
+
+ВАЖНО: Одговорот МОРА да биде валиден JSON во овој формат:
+{{
+  "sub_category": "string",
+  "confidence": 0.0-1.0,
+  "reasoning": "string"
+}}
+
+МОРА да избереш подкатегорија САМО од горната листа. Не измислувај нови подкатегории."""
+
+
+def categorize_main_category_ollama(
         client: ollama.Client,
         product: dict
-) -> ProductCategory:
+) -> ProductMainCategory:
     """
-    Categorize a single product using Ollama.
+    Categorize a single product into a main category using Ollama.
     """
     prompt = f"""Name: {product.get('name', '')}
 Description: {product.get('description', 'Нема опис')}
@@ -144,7 +172,7 @@ Source categories: {product.get('existing_categories', 'Нема')}"""
         response = client.chat(
             model=OLLAMA_MODEL,
             messages=[
-                {"role": "system", "content": build_system_prompt()},
+                {"role": "system", "content": build_main_category_prompt()},
                 {"role": "user", "content": prompt}
             ],
             format="json",
@@ -155,8 +183,56 @@ Source categories: {product.get('existing_categories', 'Нема')}"""
         content = response['message']['content']
         data = json.loads(content)
 
-        return ProductCategory(
+        return ProductMainCategory(
             main_category=data.get('main_category', 'Разно'),
+            confidence=float(data.get('confidence', 0.5)),
+            reasoning=data.get('reasoning')
+        )
+
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON parse error: {e}")
+        return ProductMainCategory(
+            main_category="Разно",
+            confidence=0.0,
+            reasoning=f"JSON parse error: {str(e)}"
+        )
+    except Exception as e:
+        print(f"❌ Ollama error: {e}")
+        return ProductMainCategory(
+            main_category="Разно",
+            confidence=0.0,
+            reasoning=f"Error: {str(e)}"
+        )
+
+
+def categorize_sub_category_ollama(
+        client: ollama.Client,
+        product: dict,
+        main_category: str
+) -> ProductSubCategory:
+    """
+    Categorize a single product into a subcategory using Ollama.
+    """
+    prompt = f"""Name: {product.get('name', '')}
+Description: {product.get('description', 'Нема опис')}
+Source categories: {product.get('existing_categories', 'Нема')}"""
+
+    try:
+        response = client.chat(
+            model=OLLAMA_MODEL,
+            messages=[
+                {"role": "system", "content": build_sub_category_prompt(main_category)},
+                {"role": "user", "content": prompt}
+            ],
+            format="json",
+            options={"temperature": 0.1}
+        )
+
+        # Parse JSON response
+        content = response['message']['content']
+        data = json.loads(content)
+
+        return ProductSubCategory(
             sub_category=data.get('sub_category', 'Останато'),
             confidence=float(data.get('confidence', 0.5)),
             reasoning=data.get('reasoning')
@@ -164,16 +240,14 @@ Source categories: {product.get('existing_categories', 'Нема')}"""
 
     except json.JSONDecodeError as e:
         print(f"❌ JSON parse error: {e}")
-        return ProductCategory(
-            main_category="Разно",
+        return ProductSubCategory(
             sub_category="Останато",
             confidence=0.0,
             reasoning=f"JSON parse error: {str(e)}"
         )
     except Exception as e:
         print(f"❌ Ollama error: {e}")
-        return ProductCategory(
-            main_category="Разно",
+        return ProductSubCategory(
             sub_category="Останато",
             confidence=0.0,
             reasoning=f"Error: {str(e)}"
@@ -185,25 +259,60 @@ def categorize_batch_ollama(
         products_chunk: List[dict]
 ) -> List[ProductCategory]:
     """
-    Categorize a batch of products using Ollama.
-    Processes one at a time since local models handle single requests better.
+    Categorize a batch of products using Ollama with two-stage approach.
+    Stage 1: Categorize all products into main categories
+    Stage 2: Group by main category and categorize into subcategories
     """
     results = []
+
+    # Stage 1: Main category categorization
+    print("   Stage 1: Categorizing main categories...")
+    main_categorizations = {}
     for product in products_chunk:
-        cat = categorize_single_product_ollama(client, product)
-        results.append(cat)
+        main_cat = categorize_main_category_ollama(client, product)
+        main_categorizations[product['_id']] = main_cat
+
+    # Group products by main category
+    products_by_main_cat = {}
+    for product in products_chunk:
+        main_cat = main_categorizations[product['_id']].main_category
+        if main_cat not in products_by_main_cat:
+            products_by_main_cat[main_cat] = []
+        products_by_main_cat[main_cat].append(product)
+
+    # Stage 2: Subcategory categorization grouped by main category
+    print(f"   Stage 2: Categorizing subcategories for {len(products_by_main_cat)} main categories...")
+    for main_cat, products_in_cat in products_by_main_cat.items():
+        print(f"      Processing {len(products_in_cat)} products in '{main_cat}'")
+        for product in products_in_cat:
+            main_cat_result = main_categorizations[product['_id']]
+            sub_cat = categorize_sub_category_ollama(client, product, main_cat)
+
+            # Combine results
+            full_categorization = ProductCategory(
+                main_category=main_cat_result.main_category,
+                sub_category=sub_cat.sub_category,
+                main_confidence=main_cat_result.confidence,
+                sub_confidence=sub_cat.confidence,
+                main_reasoning=main_cat_result.reasoning,
+                sub_reasoning=sub_cat.reasoning
+            )
+            results.append(full_categorization)
+
     return results
 
 
 async def categorize_all_products(
         products: List[dict],
-        batch_size: int = 10,
+        batch_size: int = 32,
         concurrency: int = 1  # Local models work best with sequential processing
 ) -> List[dict]:
     """
-    Categorize all products using local Ollama model.
+    Categorize all products using local Ollama model with two-stage approach.
+    Stage 1: Categorize into main categories
+    Stage 2: Group by main category and categorize into subcategories
     """
-    print(f"🚀 Starting categorization of {len(products)} products")
+    print(f"🚀 Starting TWO-STAGE categorization of {len(products)} products")
     print(f"   Model: {OLLAMA_MODEL}")
     print(f"   Batch size: {batch_size}")
     print()
@@ -215,6 +324,7 @@ async def categorize_all_products(
     # Process in batches for progress tracking
     for i in range(0, len(products), batch_size):
         batch = products[i:i + batch_size]
+        print(f"\n📦 Processing batch {i // batch_size + 1}/{(len(products) + batch_size - 1) // batch_size}")
         categorizations = categorize_batch_ollama(client, batch)
 
         for product, cat in zip(batch, categorizations):
@@ -251,8 +361,10 @@ def load_products_from_db(db, limit_per_collection: int = None) -> Tuple[List[di
     products = []
     products_markets = {}
 
-    collections = [c for c in db.list_collection_names()
-                   if c != 'products_categorized' and c != 'all_products' and not c.startswith('products')]
+    collections = [
+        c for c in db.list_collection_names()
+        if c != 'products_categorized' and c != 'all_products' and not c.startswith('products')
+    ]
 
     print(f"📂 Loading products from {len(collections)} collections...")
 
@@ -261,14 +373,22 @@ def load_products_from_db(db, limit_per_collection: int = None) -> Tuple[List[di
         if limit_per_collection:
             cursor = cursor.limit(limit_per_collection)
 
+        # Prefetch categorized ids for this collection in a single query
+        categorized_ids = set(
+            doc["_id"]
+            for doc in db["products_categorized"].find(
+                {"market": collection, "categorization.main_category": {"$exists": True}},
+                {"_id": 1}
+            )
+        )
+
         collection_count = 0
         for product in cursor:
-            existing = db['products_categorized'].find_one({'_id': product['_id']})
-            if existing and existing.get('categorization', {}).get('main_category'):
+            if product["_id"] in categorized_ids:
                 continue
 
             description = ""
-            for field in ['description', 'category', 'categories']:
+            for field in ["description", "category", "categories"]:
                 if field in product:
                     desc_value = product[field]
                     if isinstance(desc_value, list):
@@ -278,20 +398,21 @@ def load_products_from_db(db, limit_per_collection: int = None) -> Tuple[List[di
                     break
 
             new_product = {
-                '_id': product.get('_id', ''),
-                'name': product.get('name', ''),
-                'description': description,
-                'existing_categories': description
+                "_id": product.get("_id", ""),
+                "name": product.get("name", ""),
+                "description": description,
+                "existing_categories": description
             }
 
             products.append(new_product)
-            products_markets[product['_id']] = collection
+            products_markets[product["_id"]] = collection
             collection_count += 1
 
         print(f"   {collection}: {collection_count} products")
 
     print(f"📊 Total products to categorize: {len(products)}")
     return products, products_markets
+
 
 
 def save_categorizations_to_db(db, products: List[dict], products_markets: dict):
@@ -345,7 +466,7 @@ async def main():
 
     products, products_markets = load_products_from_db(
         db,
-        limit_per_collection=20
+        limit_per_collection=5
     )
 
     if not products:
@@ -355,14 +476,24 @@ async def main():
 
     categorized_products = await categorize_all_products(
         products,
-        batch_size=10
+        batch_size=1
     )
 
-    save_categorizations_to_db(db, categorized_products, products_markets)
+    # save_categorizations_to_db(db, categorized_products, products_markets)
 
     # Analyze results
     print("\n📈 Categorization Quality Analysis:")
-    confidence_ranges = {
+    print("\nMain Category Confidence:")
+    main_confidence_ranges = {
+        'High (0.9-1.0)': 0,
+        'Good (0.7-0.89)': 0,
+        'Medium (0.5-0.69)': 0,
+        'Low (<0.5)': 0,
+        'Errors': 0
+    }
+
+    print("\nSubcategory Confidence:")
+    sub_confidence_ranges = {
         'High (0.9-1.0)': 0,
         'Good (0.7-0.89)': 0,
         'Medium (0.5-0.69)': 0,
@@ -371,30 +502,54 @@ async def main():
     }
 
     for p in categorized_products:
-        conf = p['categorization'].get('confidence', 0)
-        if p['categorization'].get('main_category') is None:
-            confidence_ranges['Errors'] += 1
-        elif conf >= 0.9:
-            confidence_ranges['High (0.9-1.0)'] += 1
-        elif conf >= 0.7:
-            confidence_ranges['Good (0.7-0.89)'] += 1
-        elif conf >= 0.5:
-            confidence_ranges['Medium (0.5-0.69)'] += 1
-        else:
-            confidence_ranges['Low (<0.5)'] += 1
+        cat = p['categorization']
+        main_conf = cat.get('main_confidence', 0)
+        sub_conf = cat.get('sub_confidence', 0)
 
-    for range_name, count in confidence_ranges.items():
+        # Main category confidence
+        if cat.get('main_category') is None:
+            main_confidence_ranges['Errors'] += 1
+        elif main_conf >= 0.9:
+            main_confidence_ranges['High (0.9-1.0)'] += 1
+        elif main_conf >= 0.7:
+            main_confidence_ranges['Good (0.7-0.89)'] += 1
+        elif main_conf >= 0.5:
+            main_confidence_ranges['Medium (0.5-0.69)'] += 1
+        else:
+            main_confidence_ranges['Low (<0.5)'] += 1
+
+        # Subcategory confidence
+        if cat.get('sub_category') is None:
+            sub_confidence_ranges['Errors'] += 1
+        elif sub_conf >= 0.9:
+            sub_confidence_ranges['High (0.9-1.0)'] += 1
+        elif sub_conf >= 0.7:
+            sub_confidence_ranges['Good (0.7-0.89)'] += 1
+        elif sub_conf >= 0.5:
+            sub_confidence_ranges['Medium (0.5-0.69)'] += 1
+        else:
+            sub_confidence_ranges['Low (<0.5)'] += 1
+
+    print("\n  Main Categories:")
+    for range_name, count in main_confidence_ranges.items():
         pct = (count / len(categorized_products) * 100) if categorized_products else 0
-        print(f"   {range_name}: {count:,} ({pct:.1f}%)")
+        print(f"    {range_name}: {count:,} ({pct:.1f}%)")
+
+    print("\n  Subcategories:")
+    for range_name, count in sub_confidence_ranges.items():
+        pct = (count / len(categorized_products) * 100) if categorized_products else 0
+        print(f"    {range_name}: {count:,} ({pct:.1f}%)")
 
     print("\n📋 Sample categorizations:")
-    for i, p in enumerate(categorized_products[:5]):
+    for i, p in enumerate(categorized_products[:100]):
         cat = p['categorization']
         print(f"\n{i + 1}. {p['name'][:60]}")
         print(f"   → {cat['main_category']} / {cat['sub_category']}")
-        print(f"   Confidence: {cat['confidence']:.2f}")
-        if cat.get('reasoning'):
-            print(f"   Reasoning: {cat['reasoning'][:80]}")
+        print(f"   Main confidence: {cat.get('main_confidence', 0):.2f} | Sub confidence: {cat.get('sub_confidence', 0):.2f}")
+        if cat.get('main_reasoning'):
+            print(f"   Main reasoning: {cat['main_reasoning'][:80]}")
+        if cat.get('sub_reasoning'):
+            print(f"   Sub reasoning: {cat['sub_reasoning'][:80]}")
 
     db.client.close()
     print("\n✅ All done!")

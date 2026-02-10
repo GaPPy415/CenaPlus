@@ -83,7 +83,7 @@ class BatchProductCategories(BaseModel):
     products: List[ProductCategory] = Field(description="List of categorizations in order")
 
 
-rate_limiter = RateLimiter()
+rate_limiter = RateLimiter(rpm_limit=14, tpm_limit=200000)  # Conservative limits for GPT-4o mini
 
 def estimate_tokens(products: List[dict]) -> int:
     """
