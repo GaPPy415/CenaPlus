@@ -6,6 +6,7 @@ import psycopg2
 from psycopg2.extras import execute_batch, RealDictCursor
 import os
 from dotenv import load_dotenv, find_dotenv
+from constants import *
 
 
 def connect_to_db(table: str = None):
@@ -96,7 +97,8 @@ def load_products_to_categorize(conn, limit_per_table: int = None) -> Tuple[List
     cat_cursor.close()
 
     cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
-    tables = [row[0] for row in cursor.fetchall() if row[0] != 'all_products' and not row[0].startswith('products_categorized')]
+    # Comment skips already categorized products
+    tables = [row[0] for row in cursor.fetchall()] # if row[0]!='products_categorized']
     print(f"📂 Loading products from {len(tables)} tables...")
 
     for table in tables:
@@ -112,10 +114,10 @@ def load_products_to_categorize(conn, limit_per_table: int = None) -> Tuple[List
             product_id = product['id']
 
             # Check locally if already categorized
+            # And filter products that failed previous categorization attempts - we want to retry them
             existing = ids_products.get(product_id)
-            if existing and existing.get('main_category') and existing.get('reasoning') != "Missing from batch response":
+            if existing and existing.get('main_category') in CATEGORIES.keys() and existing.get('confidence') >= 0.5 and existing['sub_category'] in CATEGORIES[existing['main_category']]:
                 continue
-
             description = ""
             for field in ['description', 'categories', 'category']:
                 if field in product and product[field]:
