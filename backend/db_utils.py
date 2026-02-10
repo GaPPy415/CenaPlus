@@ -139,6 +139,19 @@ def load_products_to_categorize(conn, limit_per_table: int = None) -> Tuple[List
 
 def save_categorizations_to_db(conn, products: List[dict], products_markets: dict):
     print(f"\n💾 Saving {len(products)} categorizations to database...")
+
+    # Check if products_categorized table exists
+    fields = {'name': 'VARCHAR(255)',
+              'description': 'TEXT',
+              'existing_categories': 'TEXT',
+              'main_category': 'VARCHAR(255)',
+              'sub_category': 'VARCHAR(255)',
+              'confidence': 'DECIMAL',
+              'reasoning': 'TEXT',
+              'market': 'VARCHAR(255)',
+              'categorized_at': 'TIMESTAMP'}
+    create_table(conn, 'products_categorized', fields)
+
     cursor = conn.cursor()
     updated_count = 0
     inserted_count = 0
