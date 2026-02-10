@@ -103,15 +103,16 @@ def main():
     products_to_insert = []
     products_to_upsert = []
     fields = {
-        'name': '',
-        'price': 0,
-        'singular_price': 0,
-        'category': '',
-        'in_stock': 1
+        'name': 'VARCHAR(255)',
+        'price': 'INTEGER',
+        'singular_price': 'INTEGER',
+        'category': 'VARCHAR(255)',
+        'in_stock': 'INTEGER'
     }
 
-    db_products = db[collection].find()
-    names_ids = {prod['name']: prod['_id'] for prod in db_products}
+    db_products = get_products_from_table(db, collection)
+    create_table(db, collection, fields)
+    names_ids = {prod['name']: prod['id'] for prod in db_products}
 
     for key, value in products.items():
         fields['name'] = key

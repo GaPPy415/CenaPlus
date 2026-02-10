@@ -66,21 +66,22 @@ asyncio.run(fetch_all_products())
 print(f"Total products fetched: {len(all_products)}")
 print(f"Execution time: {round(time.time() - start, 3)} seconds")
 
-# Export all_products to mongodb database
+# Export all_products to postgresql database
 collection = "zito_products"
 db = connect_to_db(collection)
 fields = {
-    'name': '',
-    'price': 0,
-    'image': '',
-    'link': '',
-    'singular_price': '',
-    'category': '',
-    'in_stock': 1
+    'name': 'VARCHAR(255)',
+    'price': 'INTEGER',
+    'image': 'VARCHAR(255)',
+    'link': 'VARCHAR(255)',
+    'singular_price': 'INTEGER',
+    'category': 'VARCHAR(255)',
+    'in_stock': 'INTEGER'
 }
-# Replace from "products_to_insert = []" to insert_many with:
-db_products = db[collection].find()
-names_ids = {prod['name']: prod['_id'] for prod in db_products}
+
+db_products = get_products_from_table(db, collection)
+create_table(db, collection, fields)
+names_ids = {prod['name']: prod['id'] for prod in db_products}
 products_to_insert = []
 products_to_upsert = []
 

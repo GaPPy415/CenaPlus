@@ -152,30 +152,34 @@ def main():
 
         collection = "reptil_products"
         db = connect_to_db(collection)
-        db_products = db[f"{collection}"].find()
-        names_ids = {prod['name']: prod['_id'] for prod in db_products}
+
+        fields = {
+            'name': 'VARCHAR(255)',
+            'price': "INTEGER",
+            'image': 'VARCHAR(255)',
+            'link': 'VARCHAR(255)',
+            'singular_price': 'VARCHAR(255)',
+            'categories': 'VARCHAR(255)',
+            'in_stock': 'INTEGER'
+        }
+        create_table(db, collection, fields)
+
+        db_products = get_products_from_table(db, collection)
+        names_ids = {prod['name']: prod['id'] for prod in db_products}
+
         products_to_insert = []
         products_to_upsert = []
 
-        fields = {
-            'name': '',
-            'price': 0,
-            'image': '',
-            'link': '',
-            'singular_price': '',
-            'categories': [],
-            'in_stock': 1
-        }
-
         for key, value in all_products.items():
-            fields['name'] = key
-            fields['price'] = value[0]
-            fields['image'] = value[1]
-            fields['link'] = value[2]
-            fields['singular_price'] = value[3]
-            fields['categories'] = value[4]
-            fields['in_stock'] = value[5]
-            product = db[f"{collection}"].find_one({'name': key})
+            fields = {
+                'name': key,
+                'price': value[0],
+                'image': value[1],
+                'link': value[2],
+                'singular_price': value[3],
+                'categories': value[4],
+                'in_stock': value[5]
+            }
             handle_product(products_to_insert, products_to_upsert, names_ids, fields)
 
         save_products(db, collection, products_to_insert, products_to_upsert, all_products)

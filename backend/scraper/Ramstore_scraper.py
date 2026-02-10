@@ -90,15 +90,15 @@ collection = "ramstore_products"
 db = connect_to_db(collection)
 
 fields={
-    "name": "",
-    "price": 0,
-    "description": "",
-    "singular_price": 0,
-    "in_stock": 1
+    "name": 'VARCHAR(255)',
+    "price": "INTEGER",
+    "description": "VARCHAR(255)",
+    "singular_price": "VARCHAR(255)",
+    "in_stock": "INTEGER"
 }
-
-db_products = db[collection].find()
-names_ids = {prod['name']: prod['_id'] for prod in db_products}
+create_table(db, collection, fields)
+db_products = get_products_from_table(db, collection)
+names_ids = {prod['name']: prod['id'] for prod in db_products}
 products_to_insert = []
 products_to_upsert = []
 

@@ -166,19 +166,19 @@ if __name__ == "__main__":
                     pass
 
     print(f"Total products: {len(all_products)} in {round(time.time() - start, 2)}s")
-    print("Saving to MongoDB kam_products collection")
+    print("Saving to PostgreSQL kam_products table")
 
     collection = "kam_products"
     db = connect_to_db(collection)
     fields = {
-        'name': '',
-        'price': 0,
-        'singular_price': 0,
-        'in_stock': 1
+        'name': 'VARCHAR(255)',
+        'price': "INTEGER",
+        'singular_price': 'VARCHAR(255)',
+        'in_stock': 'INTEGER'
     }
-
-    db_products = db[collection].find()
-    names_ids = {prod['name']: prod['_id'] for prod in db_products}
+    create_table(db, collection, fields)
+    db_products = get_products_from_table(db, collection)
+    names_ids = {prod['name']: prod['id'] for prod in db_products}
     products_to_insert = []
     products_to_upsert = []
 
