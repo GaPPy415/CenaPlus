@@ -3,8 +3,11 @@ import aiohttp
 import re
 import requests
 import time
+from datetime import datetime
 
 from backend.db_utils import *
+
+MARKET_NAME = 'zito'
 
 start = time.time()
 url = 'https://bigshop.mk/wp-json/wc/store/v1/products/categories'
@@ -66,34 +69,26 @@ asyncio.run(fetch_all_products())
 print(f"Total products fetched: {len(all_products)}")
 print(f"Execution time: {round(time.time() - start, 3)} seconds")
 
-# Export all_products to postgresql database
-collection = "zito_products"
-db = connect_to_db(collection)
-fields = {
-    'name': 'VARCHAR(255)',
-    'price': 'INTEGER',
-    'image': 'VARCHAR(255)',
-    'link': 'VARCHAR(255)',
-    'singular_price': 'INTEGER',
-    'category': 'VARCHAR(255)',
-    'in_stock': 'INTEGER'
-}
-
-db_products = get_products_from_table(db, collection)
-create_table(db, collection, fields)
-names_ids = {prod['name']: prod['id'] for prod in db_products}
+db = connect_to_db()
+existing_products = get_existing_products_by_market(db, MARKET_NAME)
 products_to_insert = []
 products_to_upsert = []
+now = datetime.now()
 
 for key, value in all_products.items():
-    fields['name'] = key
-    fields['price'] = value[0]
-    fields['image'] = value[1]
-    fields['link'] = value[2]
-    fields['singular_price'] = value[3]
-    fields['category'] = value[4]
-    fields['in_stock'] = value[5]
-    handle_product(products_to_insert, products_to_upsert, names_ids, fields)
+    fields = {
+        'name': key,
+        'price': value[0],
+        'image': value[1],
+        'link': value[2],
+        'singular_price': value[3],
+        'description': str(value[4]) if value[4] else None,
+        'in_stock': value[5] == 1,
+        'market': MARKET_NAME,
+        'ETL_loadtime': now,
+        'last_updated': now
+    }
+    handle_product_for_products_table(products_to_insert, products_to_upsert, existing_products, fields, MARKET_NAME)
 
-save_products(db, collection, products_to_insert, products_to_upsert, all_products)
+save_products_to_products_table(db, MARKET_NAME, products_to_insert, products_to_upsert, set(all_products.keys()))
 print(f"Overall done in {round(time.time() - start, 2)} seconds")

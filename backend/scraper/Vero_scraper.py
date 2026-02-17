@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from datetime import datetime
 
 from backend.db_utils import *
 
@@ -10,6 +11,8 @@ BASE_URL = 'https://pricelist.vero.com.mk/'
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Mozilla/5.0"})
 MAX_WORKERS = 10  # Adjust the number of threads as needed
+
+MARKET_NAME = 'vero'
 
 # --- Global shared data ---
 products = {}
@@ -97,32 +100,28 @@ def main():
 
     print(f"\nTotal unique products: {len(products)}")
     print(f"Scraping took {round(time.time() - start, 2)}s")
-    print("Saving to MongoDB vero_products collection")
-    collection = "vero_products"
-    db = connect_to_db(collection)
+    print("Saving to PostgreSQL products table")
+
+    db = connect_to_db()
+    existing_products = get_existing_products_by_market(db, MARKET_NAME)
     products_to_insert = []
     products_to_upsert = []
-    fields = {
-        'name': 'VARCHAR(255)',
-        'price': 'INTEGER',
-        'singular_price': 'INTEGER',
-        'category': 'VARCHAR(255)',
-        'in_stock': 'INTEGER'
-    }
-
-    db_products = get_products_from_table(db, collection)
-    create_table(db, collection, fields)
-    names_ids = {prod['name']: prod['id'] for prod in db_products}
+    now = datetime.now()
 
     for key, value in products.items():
-        fields['name'] = key
-        fields['price'] = value[0]
-        fields['singular_price'] = value[1]
-        fields['category'] = value[2]
-        fields['in_stock'] = value[3]
-        handle_product(products_to_insert, products_to_upsert, names_ids, fields)
+        fields = {
+            'name': key,
+            'price': value[0],
+            'singular_price': value[1],
+            'description': value[2],
+            'in_stock': value[3] == 1,
+            'market': MARKET_NAME,
+            'ETL_loadtime': now,
+            'last_updated': now
+        }
+        handle_product_for_products_table(products_to_insert, products_to_upsert, existing_products, fields, MARKET_NAME)
 
-    save_products(db, collection, products_to_insert, products_to_upsert, products)
+    save_products_to_products_table(db, MARKET_NAME, products_to_insert, products_to_upsert, set(products.keys()))
     print(f"Overall done in {round(time.time() - start, 2)}s")
 
 if __name__ == "__main__":

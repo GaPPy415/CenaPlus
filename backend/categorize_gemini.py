@@ -375,12 +375,9 @@ async def main():
         print("❌ ERROR: GOOGLE_API_KEY not found!")
         return
 
-    db = connect_to_db('products_categorized')
+    db = connect_to_db()
 
-    products, products_markets = load_products_to_categorize(
-        db,
-        limit_per_table=None
-    )
+    products = load_products_to_categorize(db, limit=None)
 
     if not products:
         print("✅ No products need categorization!")
@@ -394,7 +391,7 @@ async def main():
         gemini_api_key=gemini_api_key
     )
 
-    save_categorizations_to_db(db, categorized_products, products_markets)
+    save_categorizations_to_db(db, categorized_products)
 
     print("\n📈 Categorization Quality Analysis:")
     confidence_ranges = {
@@ -433,6 +430,7 @@ async def main():
         if cat.get('sub_reasoning'):
             print(f"   Reasoning: {cat['sub_reasoning'][:80]}")
 
+    db.close()
     print("\n✅ All done!")
 
 

@@ -6,6 +6,7 @@ import random
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from urllib.parse import unquote
+from datetime import datetime
 from backend.db_utils import *
 
 # Logging
@@ -118,6 +119,8 @@ def scrape_category(category_info):
     return results
 
 
+MARKET_NAME = 'reptil'
+
 def main():
     start = time.time()
     link = 'https://marketonline.mk/%d0%ba%d0%b0%d1%82%d0%b5%d0%b3%d0%be%d1%80%d0%b8%d0%b8/'
@@ -146,29 +149,13 @@ def main():
             all_products.update(category_result or {})
 
         logger.info(f"Total products scraped: {len(all_products)}")
-
         logger.info(f"Done scraping in {round(time.time() - start, 3)} seconds")
 
-
-        collection = "reptil_products"
-        db = connect_to_db(collection)
-
-        fields = {
-            'name': 'VARCHAR(255)',
-            'price': "INTEGER",
-            'image': 'VARCHAR(255)',
-            'link': 'VARCHAR(255)',
-            'singular_price': 'VARCHAR(255)',
-            'categories': 'VARCHAR(255)',
-            'in_stock': 'INTEGER'
-        }
-        create_table(db, collection, fields)
-
-        db_products = get_products_from_table(db, collection)
-        names_ids = {prod['name']: prod['id'] for prod in db_products}
-
+        db = connect_to_db()
+        existing_products = get_existing_products_by_market(db, MARKET_NAME)
         products_to_insert = []
         products_to_upsert = []
+        now = datetime.now()
 
         for key, value in all_products.items():
             fields = {
@@ -177,12 +164,15 @@ def main():
                 'image': value[1],
                 'link': value[2],
                 'singular_price': value[3],
-                'categories': value[4],
-                'in_stock': value[5]
+                'description': str(value[4]) if value[4] else None,
+                'in_stock': value[5] == 1,
+                'market': MARKET_NAME,
+                'ETL_loadtime': now,
+                'last_updated': now
             }
-            handle_product(products_to_insert, products_to_upsert, names_ids, fields)
+            handle_product_for_products_table(products_to_insert, products_to_upsert, existing_products, fields, MARKET_NAME)
 
-        save_products(db, collection, products_to_insert, products_to_upsert, all_products)
+        save_products_to_products_table(db, MARKET_NAME, products_to_insert, products_to_upsert, set(all_products.keys()))
         print(f"Overall done in {round(time.time() - start, 2)}s")
 
         return all_products

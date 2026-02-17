@@ -1,8 +1,11 @@
 import pandas as pd
 from tqdm import tqdm
 from backend.db_utils import *
+from datetime import datetime
 
 start = time.time()
+
+MARKET_NAME = 'ramstore'
 
 stores = [
     "https://ramstore.com.mk/marketi/ramstore-vardar/",
@@ -64,7 +67,6 @@ for store in tqdm(stores):
     df_new = df_new.drop(columns='ВРЕМЕТРАЕЊЕ НА АКЦИЈА')
     df = pd.concat([df, df_new])
 
-# python
 product_col = df.columns[0]
 items_map = {}
 cena_popust = 'ЦЕНА СО ПОПУСТ'
@@ -86,29 +88,23 @@ for _, row in df.iterrows():
 print(f"Products scraped: {len(items_map)}")
 print(f"Scraping finished in {round(time.time() - start, 3)} seconds.")
 
-collection = "ramstore_products"
-db = connect_to_db(collection)
-
-fields={
-    "name": 'VARCHAR(255)',
-    "price": "INTEGER",
-    "description": "VARCHAR(255)",
-    "singular_price": "VARCHAR(255)",
-    "in_stock": "INTEGER"
-}
-create_table(db, collection, fields)
-db_products = get_products_from_table(db, collection)
-names_ids = {prod['name']: prod['id'] for prod in db_products}
+db = connect_to_db()
+existing_products = get_existing_products_by_market(db, MARKET_NAME)
 products_to_insert = []
 products_to_upsert = []
 
 for key, value in items_map.items():
-    fields['name'] = key
-    fields['price'] = value[0]
-    fields['description'] = value[1]
-    fields['singular_price'] = value[2]
-    fields['in_stock'] = 1
-    handle_product(products_to_insert, products_to_upsert, names_ids, fields)
+    fields = {
+        'name': key,
+        'price': value[0],
+        'description': value[1],
+        'singular_price': value[2],
+        'in_stock': True,
+        'market': MARKET_NAME,
+        'ETL_loadtime': now,
+        'last_updated': now
+    }
+    handle_product_for_products_table(products_to_insert, products_to_upsert, existing_products, fields, MARKET_NAME)
 
-save_products(db, collection, products_to_insert, products_to_upsert, items_map)
+save_products_to_products_table(db, MARKET_NAME, products_to_insert, products_to_upsert, set(items_map.keys()))
 print(f"Overall done in {round(time.time() - start, 2)}s")

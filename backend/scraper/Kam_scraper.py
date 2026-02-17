@@ -2,6 +2,7 @@ import concurrent.futures
 import requests
 from backend.db_utils import *
 from funcs import extract_name_price
+from datetime import datetime
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
@@ -97,6 +98,8 @@ stores = ["https://kam.com.mk/price_markets/madzari/",
 numbers_all_markets = [1, 2, 3, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 26, 27, 29, 31, 32, 33, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 60, 61, 62, 64, 65, 66, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 97, 98, 99]
 numbers_skopje = [1, 3, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 17, 19, 20, 27, 31, 33, 37, 39, 41, 42, 43, 52, 53, 57, 66, 76, 78, 89, 91, 92, 93, 95, 98]
 
+MARKET_NAME = 'kam'
+
 def download_pdf(url: str, timeout: int = 30) -> str | None:
     filename = url.split('/')[-1]
     try:
@@ -166,28 +169,25 @@ if __name__ == "__main__":
                     pass
 
     print(f"Total products: {len(all_products)} in {round(time.time() - start, 2)}s")
-    print("Saving to PostgreSQL kam_products table")
+    print("Saving to PostgreSQL products table")
 
-    collection = "kam_products"
-    db = connect_to_db(collection)
-    fields = {
-        'name': 'VARCHAR(255)',
-        'price': "INTEGER",
-        'singular_price': 'VARCHAR(255)',
-        'in_stock': 'INTEGER'
-    }
-    create_table(db, collection, fields)
-    db_products = get_products_from_table(db, collection)
-    names_ids = {prod['name']: prod['id'] for prod in db_products}
+    db = connect_to_db()
+    existing_products = get_existing_products_by_market(db, MARKET_NAME)
     products_to_insert = []
     products_to_upsert = []
+    now = datetime.now()
 
     for key, value in all_products.items():
-        fields['name'] = key
-        fields['price'] = value[0]
-        fields['singular_price'] = value[1]
-        fields['in_stock'] = 1
-        handle_product(products_to_insert, products_to_upsert, names_ids, fields)
+        fields = {
+            'name': key,
+            'price': value[0],
+            'singular_price': value[1],
+            'in_stock': True,
+            'market': MARKET_NAME,
+            'ETL_loadtime': now,
+            'last_updated': now
+        }
+        handle_product_for_products_table(products_to_insert, products_to_upsert, existing_products, fields, MARKET_NAME)
 
-    save_products(db, collection, products_to_insert, products_to_upsert, all_products)
+    save_products_to_products_table(db, MARKET_NAME, products_to_insert, products_to_upsert, set(all_products.keys()))
     print(f"Overall done in {round(time.time() - start, 2)}s")
