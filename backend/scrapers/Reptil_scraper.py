@@ -22,7 +22,7 @@ BACKOFF_FACTOR = 1  # exponential backoff factor
 SLEEP_MIN = 0.3
 SLEEP_MAX = 1.0
 
-logger.info("Starting Reptil scraper")
+logger.info("Starting Reptil scrapers")
 
 # Create a session with Retry/backoff and keep‑alive
 session = requests.Session()
@@ -152,7 +152,7 @@ def main():
         logger.info(f"Done scraping in {round(time.time() - start, 3)} seconds")
 
         db = connect_to_db()
-        existing_products = get_existing_products_by_market(db, MARKET_NAME)
+        existing_products = get_products_by_market(db, MARKET_NAME)
         products_to_insert = []
         products_to_upsert = []
         now = datetime.now()
@@ -178,10 +178,10 @@ def main():
         return all_products
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error in main scraper: {e}")
+        logger.error(f"Error in main scrapers: {e}")
         return {}
     except Exception as e:
-        logger.error(f"Unexpected error in main scraper: {e}")
+        logger.error(f"Unexpected error in main scrapers: {e}")
         return {}
 
 

@@ -321,6 +321,7 @@ async def categorize_all_products(
 
     async def process_sub_batch(batch_idx: int, batch: List[dict], main_cat: str):
         nonlocal completed
+        start_sub = time.time()
         async with semaphore:
             estimated_tokens = estimate_tokens_sub_category(batch)
             await rate_limiter.acquire(estimated_tokens)
@@ -328,7 +329,7 @@ async def categorize_all_products(
             for product, cat in zip(batch, sub_cats):
                 all_sub_results[product['id']] = cat
             completed += len(batch)
-            elapsed = time.time() - start_time
+            elapsed = time.time() - start_sub
             rate = completed / elapsed if elapsed > 0 else 0
             print(f"   {completed:,}/{len(products):,} ({completed * 100 // len(products)}%) | {rate:.1f} products/sec")
 

@@ -48,7 +48,7 @@ async def fetch_page(session, parent, page, semaphore):
 
 
 async def fetch_all_products():
-    semaphore = asyncio.Semaphore(32)  # Limit concurrent requests - RateLimit
+    semaphore = asyncio.Semaphore(25)  # Limit concurrent requests - RateLimit
     async with aiohttp.ClientSession() as session:
         tasks = []
         for parent in parent_categories:
@@ -70,7 +70,7 @@ print(f"Total products fetched: {len(all_products)}")
 print(f"Execution time: {round(time.time() - start, 3)} seconds")
 
 db = connect_to_db()
-existing_products = get_existing_products_by_market(db, MARKET_NAME)
+existing_products = get_products_by_market(db, MARKET_NAME)
 products_to_insert = []
 products_to_upsert = []
 now = datetime.now()

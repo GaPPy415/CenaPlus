@@ -92,5 +92,4 @@ for main_category in CATEGORIES.keys():
             continue
         embed_category_products(main_category, sub_category, embeddings, conn)
     print(f"Finished embedding for main category '{main_category}' in {round(time.time() - main_start, 2)} seconds.")
-
 conn.close()

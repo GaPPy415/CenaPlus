@@ -1,7 +1,7 @@
 import concurrent.futures
 import requests
 from backend.db_utils import *
-from funcs import extract_name_price
+from kam_pdf_utils import extract_name_price
 from datetime import datetime
 
 headers = {
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     print("Saving to PostgreSQL products table")
 
     db = connect_to_db()
-    existing_products = get_existing_products_by_market(db, MARKET_NAME)
+    existing_products = get_products_by_market(db, MARKET_NAME)
     products_to_insert = []
     products_to_upsert = []
     now = datetime.now()

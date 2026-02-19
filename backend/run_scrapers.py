@@ -14,18 +14,7 @@ def timestamp() -> str:
 
 
 def find_scraper_scripts(scraper_dir: Path) -> List[Path]:
-    # Match files ending with _scraper.py; skip helpers like *_funcs.py and __init__.py
-    scripts = [
-        p for p in scraper_dir.glob("*_scraper.py")
-        if p.name.lower() != "__init__.py"
-        and not p.name.lower().endswith("_funcs.py")
-    ]
-    # Some scrapers may not have the exact suffix pattern; include Kam_scraper.py specifically
-    kam = scraper_dir / "Kam_scraper.py"
-    if kam.exists() and kam not in scripts:
-        scripts.append(kam)
-    # Sort for stable order
-    scripts.sort(key=lambda p: p.name.lower())
+    scripts = sorted(scraper_dir.glob("*_scraper.py"), key=lambda p: p.name.lower())
     return scripts
 
 
@@ -57,7 +46,6 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True) -> Dict[s
         log.flush()
 
         try:
-            # Run with cwd at the script's folder to satisfy relative imports/paths
             proc = subprocess.Popen(
                 [sys.executable, str(script_path)],
                 cwd=str(script_path.parent),
@@ -92,7 +80,6 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True) -> Dict[s
 
 
 def run_parallel(scripts: List[Path], logs_dir: Path, max_workers: int) -> List[Dict[str, Any]]:
-    # Simpler parallel execution: capture to logs only; print minimal status to console
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     results: List[Dict[str, Any]] = []
@@ -126,13 +113,13 @@ def run_parallel(scripts: List[Path], logs_dir: Path, max_workers: int) -> List[
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run all scraper scripts with logging and summary.")
-    parser.add_argument("--scraper-dir", default=str(Path(__file__).parent / "scraper"), help="Path to scraper folder")
+    parser.add_argument("--scrapers-dir", default=str(Path(__file__).parent / "scrapers"), help="Path to scrapers folder")
     parser.add_argument("--logs-dir", default=str(Path(__file__).parent / "logs"), help="Where to store logs")
     parser.add_argument("--parallel", type=int, default=0, help="Run in parallel with N workers (0 = sequential)")
     parser.add_argument("--dry-run", action="store_true", help="List scripts without executing")
     args = parser.parse_args()
 
-    scraper_dir = Path(args.scraper_dir).resolve()
+    scraper_dir = Path(args.scrapers_dir).resolve()
     logs_dir = Path(args.logs_dir).resolve()
 
     if not scraper_dir.exists():
@@ -163,14 +150,12 @@ def main() -> int:
             summary.append(res)
             print(f"--> {p.name}: {res['status']} in {res['duration_seconds']}s (log: {res['log_file']})")
 
-    # Write summary JSON
     run_id = timestamp()
     summary_path = logs_dir / f"run_summary-{run_id}.json"
     logs_dir.mkdir(parents=True, exist_ok=True)
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
-    # Console summary
     passed = sum(1 for r in summary if r["status"] == "passed")
     failed = len(summary) - passed
     total_time = round(sum((r.get("duration_seconds") or 0) for r in summary), 2)
@@ -181,7 +166,6 @@ def main() -> int:
     print(f"Total: {len(summary)}, Passed: {passed}, Failed: {failed}, Accumulated time: {total_time}s")
     print(f"Summary file: {summary_path}")
 
-    # Return non-zero if any failed
     return 0 if failed == 0 else 1
 
 

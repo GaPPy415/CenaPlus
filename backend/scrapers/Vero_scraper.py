@@ -103,7 +103,7 @@ def main():
     print("Saving to PostgreSQL products table")
 
     db = connect_to_db()
-    existing_products = get_existing_products_by_market(db, MARKET_NAME)
+    existing_products = get_products_by_market(db, MARKET_NAME)
     products_to_insert = []
     products_to_upsert = []
     now = datetime.now()
