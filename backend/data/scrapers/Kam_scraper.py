@@ -1,6 +1,6 @@
 import concurrent.futures
 import requests
-from backend.db_utils import *
+from backend.data.db_utils import *
 from kam_pdf_utils import extract_name_price
 from datetime import datetime
 

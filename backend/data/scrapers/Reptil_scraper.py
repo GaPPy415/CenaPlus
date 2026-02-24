@@ -6,8 +6,7 @@ import random
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from urllib.parse import unquote
-from datetime import datetime
-from backend.db_utils import *
+from backend.data.db_utils import *
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

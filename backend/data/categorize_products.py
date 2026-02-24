@@ -1,20 +1,17 @@
 import asyncio
-import time
-import os
-from typing import List, Optional
-from dotenv import load_dotenv, find_dotenv
+from typing import Optional
 from pydantic import BaseModel, Field
 from google import genai
 import json
 
-from backend.RateLimiter import RateLimiter
-from backend.db_utils import *
+from backend.data.RateLimiter import RateLimiter
+from backend.data.db_utils import *
 
-from backend.db_utils import connect_to_db
+from backend.data.db_utils import connect_to_db
 
 load_dotenv(find_dotenv())
 
-from constants import CATEGORIES, TAXONOMY_COMPRESSED
+from constants import CATEGORIES, CATEGORY_DESCRIPTIONS
 
 class ProductMainCategory(BaseModel):
     """Single product main category categorization."""
@@ -37,13 +34,11 @@ class ProductCategory(BaseModel):
     main_reasoning: Optional[str] = Field(default=None, description="Main category reasoning")
     sub_reasoning: Optional[str] = Field(default=None, description="Subcategory reasoning")
 
-class BatchMainCategories(BaseModel):
-    """Multiple main category categorizations in a single response."""
-    products: List[ProductMainCategory] = Field(description="List of main category categorizations in order")
+class BatchMainResponse(BaseModel):
+    products: List[ProductMainCategory]
 
-class BatchSubCategories(BaseModel):
-    """Multiple subcategory categorizations in a single response."""
-    products: List[ProductSubCategory] = Field(description="List of subcategory categorizations in order")
+class BatchSubResponse(BaseModel):
+    products: List[ProductSubCategory]
 
 rate_limiter = RateLimiter(rpm_limit=1900, tpm_limit=3800000)
 
@@ -70,38 +65,31 @@ def estimate_tokens_sub_category(products: List[dict]) -> int:
     return system_tokens + subcategories_tokens + user_tokens + output_tokens
 
 def create_main_category_prompt() -> str:
-    main_categories = ", ".join(CATEGORIES.keys())
+    categories_block = "\n".join([
+        f"- {cat}: {desc}"
+        for cat, desc in CATEGORY_DESCRIPTIONS.items()
+    ])
     return f"""You are a product categorization expert for Macedonian supermarkets.
-Categorize ALL products into ONE main category from this list:
+Categorize each product into ONE main category from the list below.
 
-{main_categories}
+CATEGORIES:
+{categories_block}
 
 RULES:
-1. Choose most specific and relevant main category
-2. If multiple fit, choose primary use case
-3. Confidence: 0.9-1.0 clear, 0.7-0.89 good, 0.5-0.69 uncertain, <0.5 needs review
-4. Return categorizations IN THE SAME ORDER as input products
-5. Reasoning must be brief (1 sentence)
-
-Return valid JSON:
-{{
-  "products": [
-    {{
-      "main_category": "string",
-      "confidence": 0.0-1.0,
-      "reasoning": "string"
-    }}
-  ]
-}}
-
-MUST select ONLY from the provided list. Do not invent categories."""
+1. Choose the most specific and relevant main category
+2. If multiple categories seem to fit, choose based on the product's PRIMARY use case
+3. Pay close attention to the NOT/ONLY notes in each category description
+4. Confidence: 0.9-1.0 clear match, 0.7-0.89 good match, 0.5-0.69 uncertain, <0.5 needs review
+5. Return categorizations IN THE SAME ORDER as input products
+6. Reasoning must be brief (1 sentence max)
+7. Select ONLY from the provided category names. Do not invent categories."""
 
 def create_sub_category_prompt(main_category: str) -> str:
     subcategories = ", ".join(CATEGORIES.get(main_category, []))
     return f"""You are a product categorization expert for Macedonian supermarkets.
 Products already classified as: {main_category}
 
-Categorize ALL products into ONE subcategory from this list:
+Categorize each product into ONE subcategory from this list:
 
 {subcategories}
 
@@ -111,19 +99,7 @@ RULES:
 3. Confidence: 0.9-1.0 clear, 0.7-0.89 good, 0.5-0.69 uncertain, <0.5 needs review
 4. Return categorizations IN THE SAME ORDER as input products
 5. Reasoning must be brief (1 sentence)
-
-Return valid JSON:
-{{
-  "products": [
-    {{
-      "sub_category": "string",
-      "confidence": 0.0-1.0,
-      "reasoning": "string"
-    }}
-  ]
-}}
-
-MUST select ONLY from the provided list. Do not invent categories."""
+6. Select ONLY from the provided list. Do not invent categories."""
 
 async def categorize_batch_main_category(
         products_chunk: List[dict],
@@ -144,22 +120,12 @@ async def categorize_batch_main_category(
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 temperature=0.1,
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                response_schema=BatchMainResponse
             )
         )
 
-        result_data = json.loads(response.text)
-
-        if "products" in result_data:
-            for product_dict in result_data["products"]:
-                if "confidence" not in product_dict:
-                    product_dict["confidence"] = 0.5
-                if "reasoning" not in product_dict:
-                    product_dict["reasoning"] = ""
-                if "main_category" not in product_dict:
-                    product_dict["main_category"] = "Разно"
-
-        result = BatchMainCategories(**result_data)
+        result = BatchMainResponse(**json.loads(response.text))
 
         if len(result.products) != len(products_chunk):
             while len(result.products) < len(products_chunk):
@@ -171,15 +137,6 @@ async def categorize_batch_main_category(
 
         return result.products[:len(products_chunk)]
 
-    except json.JSONDecodeError as e:
-        return [
-            ProductMainCategory(
-                main_category="Разно",
-                confidence=0.0,
-                reasoning=f"JSON parse error: {str(e)}"
-            )
-            for _ in products_chunk
-        ]
     except Exception as e:
         return [
             ProductMainCategory(
@@ -210,23 +167,12 @@ async def categorize_batch_sub_category(
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 temperature=0.1,
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                response_schema=BatchSubResponse
             )
         )
 
-        result_data = json.loads(response.text)
-
-        if "products" in result_data:
-            for product_dict in result_data["products"]:
-                if "confidence" not in product_dict:
-                    product_dict["confidence"] = 0.5
-                if "reasoning" not in product_dict:
-                    product_dict["reasoning"] = ""
-                if "sub_category" not in product_dict:
-                    sub_cats = CATEGORIES.get(main_category, [])
-                    product_dict["sub_category"] = sub_cats[0] if sub_cats else "Останато"
-
-        result = BatchSubCategories(**result_data)
+        result = BatchSubResponse(**json.loads(response.text))
 
         if len(result.products) != len(products_chunk):
             sub_cats = CATEGORIES.get(main_category, [])
@@ -240,17 +186,6 @@ async def categorize_batch_sub_category(
 
         return result.products[:len(products_chunk)]
 
-    except json.JSONDecodeError as e:
-        sub_cats = CATEGORIES.get(main_category, [])
-        default_sub = sub_cats[0] if sub_cats else "Останато"
-        return [
-            ProductSubCategory(
-                sub_category=default_sub,
-                confidence=0.0,
-                reasoning=f"JSON parse error: {str(e)}"
-            )
-            for _ in products_chunk
-        ]
     except Exception as e:
         sub_cats = CATEGORIES.get(main_category, [])
         default_sub = sub_cats[0] if sub_cats else "Останато"
@@ -387,8 +322,8 @@ async def main():
 
     categorized_products = await categorize_all_products(
         products,
-        batch_size=16,
-        concurrency=64,
+        batch_size=20,
+        concurrency=128,
         gemini_api_key=gemini_api_key
     )
 

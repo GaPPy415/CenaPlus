@@ -1,12 +1,13 @@
+import html
 import time
 import uuid
 from datetime import datetime
-from typing import Tuple, List
+from typing import List
 import psycopg2
 from psycopg2.extras import execute_batch, execute_values, RealDictCursor
 import os
 from dotenv import load_dotenv, find_dotenv
-from backend.constants import *
+from backend.data.constants import *
 
 
 def connect_to_db() -> psycopg2.extensions.connection:
@@ -23,7 +24,7 @@ def connect_to_db() -> psycopg2.extensions.connection:
 
 
 def handle_product_for_products_table(products_to_insert: list, products_to_upsert: list, existing_products: dict, fields: dict, market: str):
-    key = (fields['name'], market)
+    key = (html.unescape(fields['name']), market)
     if key in existing_products:
         fields['id'] = existing_products[key]
         products_to_upsert.append(fields.copy())
@@ -62,6 +63,13 @@ def bulk_upsert_products_table(conn: psycopg2.extensions.connection, products: l
 
 def save_products_to_products_table(conn: psycopg2.extensions.connection, market: str, products_to_insert: list, products_to_upsert: list, all_product_names: set):
     save_start = time.time()
+    for prod in products_to_insert + products_to_upsert:
+        prod['name'] = html.unescape(prod['name'])
+    for prod in all_product_names:
+        cleaned = html.unescape(prod)
+        if cleaned not in all_product_names:
+            all_product_names.add(cleaned)
+            all_product_names.remove(prod)
     if products_to_upsert:
         bulk_upsert_products_table(conn, products_to_upsert)
     if products_to_insert:
@@ -87,7 +95,7 @@ def load_products_to_categorize(conn: psycopg2.extensions.connection, limit: int
     main_cats = set(CATEGORIES.keys())
 
     # First: get all products that need categorization (null main_category, confidence, or low confidence)
-    query = """
+    query = f"""
         SELECT id, name, description, market
         FROM products 
         WHERE main_category IS NULL 
@@ -110,10 +118,10 @@ def load_products_to_categorize(conn: psycopg2.extensions.connection, limit: int
     # Second: get already-categorized products and check if they have valid categories
     query2 = """
         SELECT id, name, description, market, main_category, sub_category
-        FROM products 
-        WHERE main_category IS NOT NULL 
-          AND sub_category IS NOT NULL 
-          AND confidence IS NOT NULL 
+        FROM products
+        WHERE main_category IS NOT NULL
+          AND sub_category IS NOT NULL
+          AND confidence IS NOT NULL
           AND confidence >= 0.5
     """
     cursor.execute(query2)
@@ -198,11 +206,106 @@ def save_categorizations_to_db(conn: psycopg2.extensions.connection, products: L
             'reasoning': cat.get('sub_reasoning'),
             'categorized_at': datetime.now()
         })
-    batch_update_products(conn, updates, ['main_category', 'sub_category', 'confidence', 'reasoning'], batch_size)
+    batch_update_products(conn, updates, ['main_category', 'sub_category', 'confidence', 'reasoning', 'categorized_at'], batch_size)
     print(f"   Updated: {len(products)}")
 
+def group_products_by_category(conn: psycopg2.extensions.connection, main_category: str, sub_category: str, similarity_threshold: float = 0.98):
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
-def group_products_by_category(conn: psycopg2.extensions.connection, main_category: str, sub_category: str, similarity_threshold: float = 0.99):
+    cur.execute("""
+        SELECT id, name, name_embedding, market
+        FROM products 
+        WHERE main_category = %s
+        AND sub_category = %s 
+        AND name_embedding IS NOT NULL 
+        AND group_id IS NULL
+    """, (main_category, sub_category,))
+    ungrouped_products = cur.fetchall()
+
+    if not ungrouped_products:
+        print(f"No ungrouped products found in sub-category '{sub_category}'")
+        cur.close()
+        return
+
+    print(f"Found {len(ungrouped_products)} ungrouped products in '{sub_category}'")
+
+    for product in ungrouped_products:
+        product_id = product['id']
+        product_name = product['name']
+        product_market = product['market']
+        product_embedding = product['name_embedding']
+
+        cur.execute("SELECT group_id FROM products WHERE id = %s", (product_id,))
+        current_group = cur.fetchone()
+        if current_group and current_group['group_id'] is not None:
+            continue
+
+        cur.execute("""
+            SELECT g.id, g.name,
+                   1 - (g.name_embedding <=> %s) AS similarity
+            FROM groups g
+            WHERE g.main_category = %s
+            AND g.sub_category = %s
+            AND g.name_embedding IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM products p
+                WHERE p.group_id = g.id
+                AND p.market = %s
+            )
+            ORDER BY similarity DESC
+            LIMIT 1
+        """, (product_embedding, main_category, sub_category, product_market))
+        existing_group = cur.fetchone()
+
+        if existing_group and existing_group['similarity'] >= similarity_threshold:
+            cur.execute(
+                "UPDATE products SET group_id = %s WHERE id = %s",
+                (existing_group['id'], product_id)
+            )
+            conn.commit()
+            continue
+
+        cur.execute("""
+            SELECT p.id, p.name,
+                   1 - (p.name_embedding <=> %s) AS similarity
+            FROM products p
+            WHERE p.main_category = %s
+            AND p.sub_category = %s
+            AND p.name_embedding IS NOT NULL
+            AND p.group_id IS NULL
+            AND p.id != %s
+            AND p.market != %s
+            AND 1 - (p.name_embedding <=> %s) >= %s
+            ORDER BY similarity DESC
+        """, (product_embedding, main_category, sub_category, product_id, product_market, product_embedding, similarity_threshold))
+        similar_products = cur.fetchall()
+
+        group_id = str(uuid.uuid4())
+        clean_name = product_name
+
+        cur.execute("""
+            INSERT INTO groups (id, name, main_category, sub_category, name_embedding, clean_name)
+            SELECT %s, name, main_category, sub_category, name_embedding, %s
+            FROM products WHERE id = %s
+        """, (group_id, clean_name, product_id))
+
+        cur.execute("UPDATE products SET group_id = %s WHERE id = %s", (group_id, product_id))
+
+        for similar in similar_products:
+            cur.execute(
+                "UPDATE products SET group_id = %s WHERE id = %s",
+                (group_id, similar['id'])
+            )
+
+        conn.commit()
+
+    cur.close()
+
+
+
+# Old function, with this one two products from the same market could end up in the same group
+# The new function doesn't allow this behavior
+def group_products_by_category_old(conn: psycopg2.extensions.connection, main_category: str, sub_category: str, similarity_threshold: float = 0.99):
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("""
@@ -225,43 +328,40 @@ def group_products_by_category(conn: psycopg2.extensions.connection, main_catego
     for product in ungrouped_products:
         product_id = product['id']
         product_name = product['name']
+        product_embedding = product['name_embedding']
 
-        # Check if product is already grouped (might have been grouped in a previous iteration)
         cur.execute("SELECT group_id FROM products WHERE id = %s", (product_id,))
         current_group = cur.fetchone()
         if current_group and current_group['group_id'] is not None:
             continue
 
-        # First check if product belongs to any existing group
         cur.execute("""
-            SELECT g.id, g.name, 1 - (g.name_embedding <=> (SELECT name_embedding FROM products WHERE id = %s)) as similarity
+            SELECT g.id, g.name, 1 - (g.name_embedding <=> %s) as similarity
             FROM groups g
             WHERE g.main_category = %s
             AND g.sub_category = %s
             AND g.name_embedding IS NOT NULL
             ORDER BY similarity DESC
             LIMIT 1
-        """, (product_id, main_category, sub_category))
+        """, (product_embedding, main_category, sub_category))
         existing_group = cur.fetchone()
 
         if existing_group and existing_group['similarity'] >= similarity_threshold:
-            # Assign product to existing group
             cur.execute("UPDATE products SET group_id = %s WHERE id = %s", (existing_group['id'], product_id))
             conn.commit()
             continue
 
-        # Find similar products that don't have a group yet
         cur.execute("""
-            SELECT p.id, p.name, 1 - (p.name_embedding <=> (SELECT name_embedding FROM products WHERE id = %s)) as similarity
+            SELECT p.id, p.name, 1 - (p.name_embedding <=> %s) as similarity
             FROM products p
             WHERE p.main_category = %s
             AND p.sub_category = %s
             AND p.name_embedding IS NOT NULL
             AND p.group_id IS NULL
             AND p.id != %s
-            AND 1 - (p.name_embedding <=> (SELECT name_embedding FROM products WHERE id = %s)) >= %s
+            AND 1 - (p.name_embedding <=> %s) >= %s
             ORDER BY similarity DESC
-        """, (product_id, main_category, sub_category, product_id, product_id, similarity_threshold))
+        """, (product_embedding, main_category, sub_category, product_id, product_embedding, similarity_threshold))
         similar_products = cur.fetchall()
 
         if similar_products:

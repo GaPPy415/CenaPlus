@@ -1,4 +1,4 @@
-from backend.db_utils import *
+from backend.data.db_utils import *
 import time
 import requests
 from bs4 import BeautifulSoup

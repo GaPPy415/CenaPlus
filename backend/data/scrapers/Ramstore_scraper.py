@@ -1,6 +1,6 @@
 import pandas as pd
 from tqdm import tqdm
-from backend.db_utils import *
+from backend.data.db_utils import *
 from datetime import datetime
 
 start = time.time()

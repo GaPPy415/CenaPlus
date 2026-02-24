@@ -2,9 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
-from datetime import datetime
 
-from backend.db_utils import *
+from backend.data.db_utils import *
 
 # --- Configuration ---
 BASE_URL = 'https://pricelist.vero.com.mk/'

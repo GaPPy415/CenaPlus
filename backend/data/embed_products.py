@@ -1,14 +1,13 @@
 import psycopg2
 import numpy as np
-from numpy.linalg import norm
 from dotenv import find_dotenv, load_dotenv
 import os
 import asyncio
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import time
-from backend.constants import *
+from backend.data.constants import *
 from psycopg2.extras import execute_values
-from backend.RateLimiter import RateLimiter
+from backend.data.RateLimiter import RateLimiter
 from cyrtranslit import to_cyrillic
 
 load_dotenv(find_dotenv())

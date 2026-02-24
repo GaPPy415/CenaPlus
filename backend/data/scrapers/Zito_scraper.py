@@ -2,10 +2,8 @@ import asyncio
 import aiohttp
 import re
 import requests
-import time
-from datetime import datetime
 
-from backend.db_utils import *
+from backend.data.db_utils import *
 
 MARKET_NAME = 'zito'
 
