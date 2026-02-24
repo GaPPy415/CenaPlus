@@ -1,11 +1,22 @@
 from enum import Enum
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from psycopg2.extras import RealDictCursor
 from backend.data.db_utils import connect_to_db
 from backend.data.constants import CATEGORIES
 
 app = FastAPI()
 conn = connect_to_db()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8080",
+    ],
+    # allow_credentials=True,  # only if using cookies
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class PerPage(int, Enum):

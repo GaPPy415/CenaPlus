@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 120 20% 98%;
+    --foreground: 220 20% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 10%;
+
+    --primary: 142 55% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 35 90% 55%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 120 10% 94%;
+    --muted-foreground: 220 10% 45%;
+
+    --accent: 142 30% 92%;
+    --accent-foreground: 142 55% 25%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 120 10% 88%;
+    --input: 120 10% 88%;
+    --ring: 142 55% 40%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Custom tokens */
+    --market-reptil: 210 80% 50%;
+    --market-zito: 35 90% 50%;
+    --market-kam: 0 75% 50%;
+    --market-ramstore: 280 60% 45%;
+    --market-tinex: 220 70% 35%;
+    --market-stokomak: 160 60% 40%;
+
+    --price-best: 142 55% 40%;
+    --price-worst: 0 60% 55%;
+
+    --shadow-card: 0 2px 12px -2px hsl(220 20% 10% / 0.08);
+    --shadow-card-hover: 0 8px 24px -4px hsl(220 20% 10% / 0.12);
+  }
+
+  .dark {
+    --background: 220 20% 8%;
+    --foreground: 120 10% 94%;
+    --card: 220 20% 12%;
+    --card-foreground: 120 10% 94%;
+    --popover: 220 20% 12%;
+    --popover-foreground: 120 10% 94%;
+    --primary: 142 55% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 35 90% 55%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 15% 18%;
+    --muted-foreground: 220 10% 60%;
+    --accent: 142 30% 18%;
+    --accent-foreground: 142 55% 70%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 15% 22%;
+    --input: 220 15% 22%;
+    --ring: 142 55% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'DM Sans', 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@layer components {
+  .category-card {
+    @apply bg-card rounded-xl border border-border p-5 cursor-pointer transition-all duration-200;
+    box-shadow: var(--shadow-card);
+  }
+  .category-card:hover {
+    box-shadow: var(--shadow-card-hover);
+    @apply border-primary/30 -translate-y-0.5;
+  }
+
+  .product-card {
+    @apply bg-card rounded-xl border border-border overflow-hidden transition-all duration-200;
+    box-shadow: var(--shadow-card);
+  }
+  .product-card:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .price-best {
+    @apply text-accent-foreground font-bold;
+  }
+
+  .price-row {
+    @apply flex items-center justify-between py-2 px-3 border-b border-border last:border-b-0;
+  }
+
+  .subcategory-chip {
+    @apply px-4 py-2 rounded-full border border-border bg-card text-sm font-medium cursor-pointer transition-all duration-200;
+  }
+  .subcategory-chip:hover {
+    @apply border-primary/40 bg-accent text-accent-foreground;
+  }
+  .subcategory-chip.active {
+    @apply bg-primary text-primary-foreground border-primary;
+  }
+}
