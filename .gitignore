@@ -10,10 +10,10 @@
 /httpRequests/
 
 # Logs folder
-/backend/logs
+/backend/data/logs
 
 # Deprecated scrapers
-/backend/deprecated
+/backend/data/deprecated
 
 shto.*
 .idea/
