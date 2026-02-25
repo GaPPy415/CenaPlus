@@ -1,12 +1,15 @@
 from enum import Enum
+import numpy as np
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2.extras import RealDictCursor
 from backend.data.db_utils import connect_to_db
 from backend.data.constants import CATEGORIES
+from backend.data.text_utils import normalize_name, get_embeddings_client, normalize_embedding
 
 app = FastAPI()
 conn = connect_to_db()
+embeddings_client = get_embeddings_client()
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +31,27 @@ class PerPage(int, Enum):
 @app.get("/categories")
 def get_categories():
     return {k: v for k, v in CATEGORIES.items()}
+
+
+@app.get("/search")
+def search_products(q: str = Query(..., min_length=1)):
+    normalized = normalize_name(q)
+    vector = normalize_embedding(np.array(embeddings_client.embed_query(normalized))).tolist()
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT *, 1 - (name_embedding <=> %s::vector) AS similarity
+            FROM grouped_products
+            WHERE 1 - (name_embedding <=> %s::vector) >= 0.80
+            ORDER BY similarity DESC
+            LIMIT 15
+            """,
+            (vector, vector),
+        )
+        rows = cur.fetchall()
+
+    return {"data": rows}
 
 
 @app.get("/{main_category}/{sub_category}")
@@ -70,4 +94,5 @@ def get_grouped_products(
         "per_page": per_page.value,
         "data": rows,
     }
+
 

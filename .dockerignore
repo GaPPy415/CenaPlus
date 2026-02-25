@@ -1,0 +1,12 @@
+backend/__pycache__/
+backend/data/logs/
+backend/data/__pycache__/
+backend/data/scrapers/__pycache__/
+backend/data/deprecated/
+node_modules/
+dist/
+.git/
+.venv/
+__pycache__/
+.env
+

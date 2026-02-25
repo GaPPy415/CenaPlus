@@ -8,7 +8,7 @@ import time
 from backend.data.constants import *
 from psycopg2.extras import execute_values
 from backend.data.RateLimiter import RateLimiter
-from cyrtranslit import to_cyrillic
+from backend.data.text_utils import normalize_name, get_embeddings_client, normalize_embedding
 
 load_dotenv(find_dotenv())
 BATCH_SIZE = 100
@@ -20,19 +20,9 @@ conn = psycopg2.connect(
     password=os.getenv("POSTGRES_PASSWORD", "password")
 )
 
-google_api_key = os.getenv("GOOGLE_API_KEY")
-embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001",
-    task_type='semantic_similarity',
-    output_dimensionality=768
-)
+embeddings = get_embeddings_client()
 rate_limiter = RateLimiter(rpm_limit=2850, tpm_limit=1000000)
 
-def normalize_embedding(embedding: np.ndarray) -> np.ndarray:
-    n = np.linalg.norm(embedding)
-    if n == 0:
-        return embedding
-    return embedding / n
 
 def embed_category_products(category: str, sub_category: str, embeddings: GoogleGenerativeAIEmbeddings, conn: psycopg2.extensions.connection):
     start = time.time()
@@ -49,7 +39,7 @@ def embed_category_products(category: str, sub_category: str, embeddings: Google
         return
 
     all_rows = []
-    names = [' '.join(sorted(to_cyrillic(p[1].lower(), 'mk').split(' '))) for p in products]
+    names = [normalize_name(p[1]) for p in products]
 
     for batch_start in range(0, len(names), BATCH_SIZE):
         batch_names = names[batch_start:batch_start + BATCH_SIZE]

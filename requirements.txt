@@ -1,5 +1,4 @@
 # Database
-pymongo>=4.0.0
 psycopg2-binary>=2.9.0
 
 # Environment
@@ -7,6 +6,7 @@ python-dotenv>=1.0.0
 
 # API clients
 google-genai>=0.1.0
+langchain_google_genai>=0.1.0
 
 # Data validation
 pydantic>=2.0.0
@@ -20,3 +20,4 @@ aiohttp>=3.8.0
 
 # Text transliteration
 cyrtranslit>=1.1.1
+numpy>=1.24.0

@@ -16,12 +16,17 @@ export interface GroupedProduct {
   main_category: string;
   sub_category: string;
   products: Product[];
+  similarity?: number;
 }
 
 export interface ProductsResponse {
   total: number;
   page: number;
   per_page: number;
+  data: GroupedProduct[];
+}
+
+export interface SearchResponse {
   data: GroupedProduct[];
 }
 
@@ -36,3 +41,11 @@ export async function fetchProducts(
   if (!res.ok) throw new Error(`Failed to fetch products: ${res.status}`);
   return res.json();
 }
+
+export async function searchProducts(query: string): Promise<SearchResponse> {
+  const url = `${API_BASE}/search?q=${encodeURIComponent(query)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Search failed: ${res.status}`);
+  return res.json();
+}
+
