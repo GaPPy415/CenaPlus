@@ -1,6 +1,26 @@
 version: '3.8'
 
 services:
+  db:
+    image: pgvector/pgvector:pg18
+    container_name: cenaplus_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./init:/docker-entrypoint-initdb.d
+    ports:
+      - "${POSTGRES_PORT:-5454}:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   backend:
     build:
       context: .
@@ -8,8 +28,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - POSTGRES_HOST=host.docker.internal
-      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-postgres}
       - POSTGRES_USER=${POSTGRES_USER:-user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
@@ -17,8 +37,9 @@ services:
     volumes:
       - ./backend:/app/backend
     restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build:
@@ -30,4 +51,5 @@ services:
     depends_on:
       - backend
 
-
+volumes:
+  postgres_data:
