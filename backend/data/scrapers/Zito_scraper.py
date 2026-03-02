@@ -40,13 +40,15 @@ async def fetch_page(session, parent, page, semaphore):
         cat_url = f"https://bigshop.mk/wp-json/wc/store/v1/products?category={parent['id']}&per_page=100&page={page}"
         print(f"Fetching products for category: {parent['name']} Page: {page}")
         async with session.get(cat_url) as response:
+            if response.status != 200:
+                print(f"Error {response.status} for {parent['name']} page {page}, skipping")
+                return []
             result = await response.json()
-        # await asyncio.sleep(0.05)  # Delay after each request - RateLimit
         return result
 
 
 async def fetch_all_products():
-    semaphore = asyncio.Semaphore(25)  # Limit concurrent requests - RateLimit
+    semaphore = asyncio.Semaphore(20)  # Limit concurrent requests - RateLimit
     async with aiohttp.ClientSession() as session:
         tasks = []
         for parent in parent_categories:
