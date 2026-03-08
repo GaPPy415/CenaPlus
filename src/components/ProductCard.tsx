@@ -14,7 +14,7 @@ const ProductCard = ({ group }: ProductCardProps) => {
   return (
     <div className="product-card animate-fade-in flex flex-col">
       {/* Image */}
-      <div className="flex items-center justify-center p-4 bg-muted/30 h-48">
+      <div className="flex items-center justify-center p-4 bg-muted/30 h-48 overflow-hidden rounded-t-xl">
         {firstImage ? (
           <img
             src={firstImage}
@@ -41,7 +41,7 @@ const ProductCard = ({ group }: ProductCardProps) => {
 
       {/* Prices */}
       <div className="mt-auto">
-        {sorted.map((product, idx) => {
+        {sorted.map((product) => {
           const market = MARKET_INFO[product.market] || { name: product.market, color: "hsl(var(--muted-foreground))" };
           const isBest = product.price === bestPrice && sorted.length > 1;
 
@@ -51,7 +51,7 @@ const ProductCard = ({ group }: ProductCardProps) => {
               href={product.link}
               target="_blank"
               rel="noopener noreferrer"
-              className="price-row group/row hover:bg-muted/50 transition-colors"
+              className="price-row group/row hover:bg-muted/50 transition-colors relative"
             >
               <div className="flex items-center gap-2 min-w-0">
                 <span
@@ -66,6 +66,19 @@ const ProductCard = ({ group }: ProductCardProps) => {
               <span className={`text-sm font-semibold tabular-nums flex-shrink-0 ${isBest ? 'price-best' : 'text-card-foreground'}`}>
                 {product.price} ден.
               </span>
+
+              {/* Tooltip */}
+              <div className="absolute left-0 right-0 bottom-full mb-1 z-50 pointer-events-none opacity-0 group-hover/row:opacity-100 transition-opacity duration-100">
+                <div className="bg-popover text-popover-foreground text-xs rounded-md border shadow-md px-3 py-2 w-max max-w-[280px]">
+                  <p className="font-medium leading-snug">{product.name}</p>
+                  {product.singular_price && (
+                    <p className="text-muted-foreground mt-1">Ед. цена: {product.singular_price}</p>
+                  )}
+                  <p className={`mt-1 ${product.in_stock ? 'text-green-600' : 'text-destructive'}`}>
+                    {product.in_stock ? 'Има залиха' : 'Нема залиха'}
+                  </p>
+                </div>
+              </div>
             </a>
           );
         })}

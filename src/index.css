@@ -109,7 +109,7 @@
   }
 
   .product-card {
-    @apply bg-card rounded-xl border border-border overflow-hidden transition-all duration-200;
+    @apply bg-card rounded-xl border border-border transition-all duration-200;
     box-shadow: var(--shadow-card);
   }
   .product-card:hover {

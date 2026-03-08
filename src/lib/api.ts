@@ -4,6 +4,7 @@ export interface Product {
   product_id: string;
   name: string;
   price: number;
+  singular_price: string | null;
   market: string;
   in_stock: boolean;
   image: string;
