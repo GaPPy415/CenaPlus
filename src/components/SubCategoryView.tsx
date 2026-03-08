@@ -3,7 +3,7 @@ import { useState } from "react";
 import { fetchProducts } from "@/lib/api";
 import ProductCard from "@/components/ProductCard";
 import { MARKET_INFO } from "@/lib/categories";
-import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 interface Props {
   mainCategory: string;
@@ -17,6 +17,7 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState<12 | 24 | 36>(12);
   const [selectedMarkets, setSelectedMarkets] = useState<string[]>([]);
+  const [pageInput, setPageInput] = useState("");
 
   const toggleMarket = (key: string) => {
     setSelectedMarkets((prev) =>
@@ -127,24 +128,90 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-8">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="p-2 rounded-lg bg-muted text-muted-foreground hover:bg-accent disabled:opacity-30 transition-colors"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-              <span className="text-sm font-medium text-foreground px-4">
-                {page} / {totalPages}
-              </span>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="p-2 rounded-lg bg-muted text-muted-foreground hover:bg-accent disabled:opacity-30 transition-colors"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
+            <div className="flex flex-col items-center gap-3 mt-8">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage(1)}
+                  disabled={page === 1}
+                  className="p-2 rounded-lg bg-muted text-muted-foreground hover:bg-accent disabled:opacity-30 transition-colors"
+                >
+                  <ChevronsLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="p-2 rounded-lg bg-muted text-muted-foreground hover:bg-accent disabled:opacity-30 transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                {(() => {
+                  const pages: (number | "...")[] = [];
+                  if (totalPages <= 7) {
+                    for (let i = 1; i <= totalPages; i++) pages.push(i);
+                  } else {
+                    pages.push(1);
+                    if (page > 3) pages.push("...");
+                    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) {
+                      pages.push(i);
+                    }
+                    if (page < totalPages - 2) pages.push("...");
+                    pages.push(totalPages);
+                  }
+                  return pages.map((p, idx) =>
+                    p === "..." ? (
+                      <span key={`ellipsis-${idx}`} className="px-2 text-sm text-muted-foreground">…</span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setPage(p)}
+                        className={`w-9 h-9 rounded-lg text-sm font-medium transition-colors ${
+                          page === p
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted text-muted-foreground hover:bg-accent"
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  );
+                })()}
+
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="p-2 rounded-lg bg-muted text-muted-foreground hover:bg-accent disabled:opacity-30 transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setPage(totalPages)}
+                  disabled={page === totalPages}
+                  className="p-2 rounded-lg bg-muted text-muted-foreground hover:bg-accent disabled:opacity-30 transition-colors"
+                >
+                  <ChevronsRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>Оди на страна</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const n = parseInt(pageInput, 10);
+                      if (n >= 1 && n <= totalPages) setPage(n);
+                    }
+                  }}
+                  placeholder={String(page)}
+                  className="w-16 h-8 rounded-md border border-border bg-background text-center text-sm font-medium text-foreground outline-none focus:ring-2 focus:ring-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <span>од {totalPages}</span>
+              </div>
             </div>
           )}
         </>
