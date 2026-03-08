@@ -95,6 +95,6 @@ export const MARKET_INFO: Record<string, { name: string; color: string }> = {
   zito: { name: "Жито Маркет", color: "hsl(var(--market-zito))" },
   kam: { name: "КАМ", color: "hsl(var(--market-kam))" },
   ramstore: { name: "Ramstore", color: "hsl(var(--market-ramstore))" },
-  tinex: { name: "Тинекс", color: "hsl(var(--market-tinex))" },
+  vero: { name: "Веро", color: "hsl(var(--market-vero))" },
   stokomak: { name: "Стокомак", color: "hsl(var(--market-stokomak))" },
 };

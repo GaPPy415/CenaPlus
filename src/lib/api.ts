@@ -34,9 +34,13 @@ export async function fetchProducts(
   mainCategory: string,
   subCategory: string,
   page = 1,
-  perPage: 12 | 24 | 36 = 12
+  perPage: 12 | 24 | 36 = 12,
+  markets: string[] = []
 ): Promise<ProductsResponse> {
-  const url = `${API_BASE}/${encodeURIComponent(mainCategory)}/${encodeURIComponent(subCategory)}?page=${page}&per_page=${perPage}`;
+  let url = `${API_BASE}/${encodeURIComponent(mainCategory)}/${encodeURIComponent(subCategory)}?page=${page}&per_page=${perPage}`;
+  for (const m of markets) {
+    url += `&market=${encodeURIComponent(m)}`;
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch products: ${res.status}`);
   return res.json();

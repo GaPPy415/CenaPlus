@@ -60,6 +60,7 @@ def get_grouped_products(
     sub_category: str,
     page: int = Query(1, ge=1),
     per_page: PerPage = Query(PerPage.twelve),
+    market: list[str] = Query(None),
 ):
     if main_category not in CATEGORIES:
         raise HTTPException(404, "Main category not found")
@@ -68,25 +69,54 @@ def get_grouped_products(
 
     offset = per_page.value * (page - 1)
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT * FROM grouped_products
-            WHERE main_category = %s AND sub_category = %s
-            ORDER BY group_name
-            LIMIT %s OFFSET %s
-            """,
-            (main_category, sub_category, per_page.value, offset),
-        )
-        rows = cur.fetchall()
+        if market:
+            cur.execute(
+                """
+                SELECT * FROM grouped_products gp
+                WHERE main_category = %s AND sub_category = %s
+                  AND EXISTS (
+                    SELECT 1 FROM json_array_elements(gp.products) AS elem
+                    WHERE elem->>'market' = ANY(%s)
+                  )
+                ORDER BY group_name
+                LIMIT %s OFFSET %s
+                """,
+                (main_category, sub_category, market, per_page.value, offset),
+            )
+            rows = cur.fetchall()
 
-        cur.execute(
-            """
-            SELECT COUNT(*) FROM grouped_products
-            WHERE main_category = %s AND sub_category = %s
-            """,
-            (main_category, sub_category),
-        )
-        total = cur.fetchone()["count"]
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM grouped_products gp
+                WHERE main_category = %s AND sub_category = %s
+                  AND EXISTS (
+                    SELECT 1 FROM json_array_elements(gp.products) AS elem
+                    WHERE elem->>'market' = ANY(%s)
+                  )
+                """,
+                (main_category, sub_category, market),
+            )
+            total = cur.fetchone()["count"]
+        else:
+            cur.execute(
+                """
+                SELECT * FROM grouped_products
+                WHERE main_category = %s AND sub_category = %s
+                ORDER BY group_name
+                LIMIT %s OFFSET %s
+                """,
+                (main_category, sub_category, per_page.value, offset),
+            )
+            rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM grouped_products
+                WHERE main_category = %s AND sub_category = %s
+                """,
+                (main_category, sub_category),
+            )
+            total = cur.fetchone()["count"]
 
     return {
         "total": total,

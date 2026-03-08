@@ -66,7 +66,7 @@ export default {
           zito: "hsl(var(--market-zito))",
           kam: "hsl(var(--market-kam))",
           ramstore: "hsl(var(--market-ramstore))",
-          tinex: "hsl(var(--market-tinex))",
+          vero: "hsl(var(--market-vero))",
           stokomak: "hsl(var(--market-stokomak))",
         },
       },

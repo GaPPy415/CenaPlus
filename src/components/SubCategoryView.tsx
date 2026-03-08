@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { fetchProducts } from "@/lib/api";
 import ProductCard from "@/components/ProductCard";
+import { MARKET_INFO } from "@/lib/categories";
 import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface Props {
@@ -10,14 +11,23 @@ interface Props {
 }
 
 const PER_PAGE_OPTIONS = [12, 24, 36] as const;
+const ALL_MARKETS = Object.keys(MARKET_INFO);
 
 const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState<12 | 24 | 36>(12);
+  const [selectedMarkets, setSelectedMarkets] = useState<string[]>([]);
+
+  const toggleMarket = (key: string) => {
+    setSelectedMarkets((prev) =>
+      prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
+    );
+    setPage(1);
+  };
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["products", mainCategory, subCategory, page, perPage],
-    queryFn: () => fetchProducts(mainCategory, subCategory, page, perPage),
+    queryKey: ["products", mainCategory, subCategory, page, perPage, selectedMarkets],
+    queryFn: () => fetchProducts(mainCategory, subCategory, page, perPage, selectedMarkets),
   });
 
   const totalPages = data ? Math.ceil(data.total / data.per_page) : 0;
@@ -53,6 +63,40 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Market filter */}
+      <div className="flex items-center gap-2 mb-6 flex-wrap">
+        {ALL_MARKETS.map((key) => {
+          const info = MARKET_INFO[key];
+          const active = selectedMarkets.includes(key);
+          return (
+            <button
+              key={key}
+              onClick={() => toggleMarket(key)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors border ${
+                active
+                  ? "border-transparent text-primary-foreground"
+                  : "border-border bg-background text-muted-foreground hover:bg-accent"
+              }`}
+              style={active ? { backgroundColor: info.color } : undefined}
+            >
+              <span
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{ backgroundColor: info.color }}
+              />
+              {info.name}
+            </button>
+          );
+        })}
+        {selectedMarkets.length > 0 && (
+          <button
+            onClick={() => { setSelectedMarkets([]); setPage(1); }}
+            className="px-3 py-1 rounded-full text-sm font-medium text-muted-foreground hover:bg-accent transition-colors"
+          >
+            Ресетирај
+          </button>
+        )}
       </div>
 
       {/* Loading */}
