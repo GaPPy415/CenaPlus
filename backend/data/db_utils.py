@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import List
 import psycopg2
-from psycopg2.extras import execute_batch, execute_values, RealDictCursor
+from psycopg2.extras import execute_values, RealDictCursor
 import os
 from dotenv import load_dotenv, find_dotenv
 from backend.data.constants import *
@@ -23,22 +23,17 @@ def connect_to_db() -> psycopg2.extensions.connection:
     return conn
 
 
-def handle_product_for_products_table(products_to_insert: list, products_to_upsert: list, existing_products: dict, fields: dict, market: str):
-    key = (html.unescape(fields['name']), market)
-    if key in existing_products:
-        fields['id'] = existing_products[key]
-        products_to_upsert.append(fields.copy())
-    else:
-        fields['id'] = str(uuid.uuid4())
-        products_to_insert.append(fields.copy())
-
-
 def mark_out_of_stock_products_table(conn: psycopg2.extensions.connection, market: str, product_names: set):
     cursor = conn.cursor()
     cursor.execute("SELECT id, name FROM products WHERE market = %s AND in_stock = true", (market,))
-    for row in cursor.fetchall():
-        if row[1] not in product_names:
-            cursor.execute("UPDATE products SET in_stock = false, last_updated = %s WHERE id = %s", (datetime.now(), row[0]))
+
+    ids_to_update = [row[0] for row in cursor.fetchall() if row[1] not in product_names]
+
+    if ids_to_update:
+        cursor.execute(
+            "UPDATE products SET in_stock = false, last_updated = %s WHERE id = ANY(%s::uuid[])",
+            (datetime.now(), ids_to_update)
+        )
     conn.commit()
     cursor.close()
 
@@ -48,32 +43,36 @@ def bulk_upsert_products_table(conn: psycopg2.extensions.connection, products: l
         return
     cursor = conn.cursor()
     columns = list(products[0].keys())
-    placeholders = ', '.join(['%s'] * len(columns))
+
     update_set = ', '.join([f"{col} = EXCLUDED.{col}" for col in columns if col != 'id'])
+
     insert_sql = f"""
         INSERT INTO products ({', '.join(columns)})
-        VALUES ({placeholders})
+        VALUES %s
         ON CONFLICT (id) DO UPDATE SET {update_set}
     """
-    data = [tuple(prod[col] for col in columns) for prod in products]
-    execute_batch(cursor, insert_sql, data)
+    data = [tuple(prod.get(col) for col in columns) for prod in products]
+    execute_values(cursor, insert_sql, data, page_size=5000)
     conn.commit()
     cursor.close()
 
 
-def save_products_to_products_table(conn: psycopg2.extensions.connection, market: str, products_to_insert: list, products_to_upsert: list, all_product_names: set):
+def save_products_to_products_table(conn: psycopg2.extensions.connection, market: str, products_to_upsert: list, all_product_names: set):
     save_start = time.time()
-    for prod in products_to_insert + products_to_upsert:
+
+    for prod in products_to_upsert:
         prod['name'] = html.unescape(prod['name'])
-    for prod in all_product_names:
+
+    for prod in list(all_product_names):
         cleaned = html.unescape(prod)
         if cleaned not in all_product_names:
             all_product_names.add(cleaned)
-            all_product_names.remove(prod)
+            if prod in all_product_names:
+                all_product_names.remove(prod)
+
     if products_to_upsert:
         bulk_upsert_products_table(conn, products_to_upsert)
-    if products_to_insert:
-        bulk_upsert_products_table(conn, products_to_insert)
+
     print(f"Saved to PostgreSQL in {round(time.time() - save_start, 2)}s")
     mark_start = time.time()
     mark_out_of_stock_products_table(conn, market, all_product_names)

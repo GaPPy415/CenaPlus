@@ -7,6 +7,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from urllib.parse import unquote
 from backend.data.db_utils import *
+import html
+import uuid
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -152,12 +154,14 @@ def main():
 
         db = connect_to_db()
         existing_products = get_products_by_market(db, MARKET_NAME)
-        products_to_insert = []
         products_to_upsert = []
         now = datetime.now()
 
         for key, value in all_products.items():
+            normalized_name = html.unescape(key)
+            existing_id = existing_products.get((normalized_name, MARKET_NAME))
             fields = {
+                'id': existing_id if existing_id else str(uuid.uuid4()),
                 'name': key,
                 'price': value[0],
                 'image': value[1],
@@ -169,9 +173,9 @@ def main():
                 'ETL_loadtime': now,
                 'last_updated': now
             }
-            handle_product_for_products_table(products_to_insert, products_to_upsert, existing_products, fields, MARKET_NAME)
+            products_to_upsert.append(fields)
 
-        save_products_to_products_table(db, MARKET_NAME, products_to_insert, products_to_upsert, set(all_products.keys()))
+        save_products_to_products_table(db, MARKET_NAME, products_to_upsert, set(all_products.keys()))
         print(f"Overall done in {round(time.time() - start, 2)}s")
 
         return all_products

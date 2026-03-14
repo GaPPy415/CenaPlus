@@ -1,12 +1,15 @@
 from __future__ import annotations
 import argparse
 import json
+import os
 import sys
 import subprocess
 import time
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
+
+PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 
 
 def timestamp() -> str:
@@ -45,10 +48,15 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True) -> Dict[s
         log.write(header)
         log.flush()
 
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join([PROJECT_ROOT, str(script_path.parent)])
+        env["PYTHONIOENCODING"] = "utf-8"
+
         try:
             proc = subprocess.Popen(
                 [sys.executable, str(script_path)],
                 cwd=str(script_path.parent),
+                env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

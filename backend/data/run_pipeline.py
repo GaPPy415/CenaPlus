@@ -1,9 +1,14 @@
 """Run the full data pipeline: scrape → categorize → embed → group."""
 from __future__ import annotations
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from backend.data.run_scrapers import find_scraper_scripts
+
+PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 
 SCRIPTS = [
     "run_scrapers.py",
@@ -16,6 +21,8 @@ def main() -> int:
     data_dir = Path(__file__).parent.resolve()
     failed = []
 
+    num_scrapers = len(find_scraper_scripts(data_dir / "scrapers"))
+
     for script in SCRIPTS:
         path = data_dir / script
         if not path.exists():
@@ -27,9 +34,17 @@ def main() -> int:
         print(f"Running {script}...")
         print(f"{'='*60}")
         start = time.perf_counter()
+        env = os.environ.copy()
+        env["PYTHONPATH"] = PROJECT_ROOT
+
+        cmd = [sys.executable, str(path)]
+        if script == "run_scrapers.py" and num_scrapers > 0:
+            cmd += ["--parallel", str(num_scrapers)]
+
         result = subprocess.run(
-            [sys.executable, str(path)],
+            cmd,
             cwd=str(data_dir),
+            env=env,
         )
         elapsed = round(time.perf_counter() - start, 2)
 
