@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from backend.data.run_scrapers import find_scraper_scripts
+from run_scrapers import find_scraper_scripts
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 
