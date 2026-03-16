@@ -1,0 +1,11 @@
+psycopg2-binary==2.9.11
+python-dotenv==1.2.1
+numpy==2.2.0
+pydantic==2.12.5
+google-genai==1.60.0
+langchain-google-genai==4.2.0
+cyrtranslit==1.2.0
+requests==2.31.0
+pandas==2.2.3
+tqdm==4.67.1
+beautifulsoup4==4.12.3
