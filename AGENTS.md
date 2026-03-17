@@ -16,11 +16,7 @@ Gemini Embedding 001 → 768-dim name_embedding vectors
 pgvector cosine similarity → groups table → grouped_products view
         ↓
 FastAPI serves grouped_products → React frontend displays price comparisons
-        ↓
-Docker Compose (PostgreSQL + FastAPI backend + Nginx frontend)
 ```
-
----
 
 ## Tech Stack
 
@@ -33,36 +29,6 @@ Docker Compose (PostgreSQL + FastAPI backend + Nginx frontend)
 | Testing    | Vitest, @testing-library/react, jsdom                                                            |
 | Tooling    | ESLint (flat config), PostCSS, Autoprefixer, Bun (lockfile)                                      |
 | Deployment | Docker Compose, Nginx (frontend static serving), python:3.12-alpine (backend), oven/bun (build)  |
-
----
-
-## Directory Structure
-
-```
-CenaPlus/
-├── backend/
-│   ├── api.py                      # FastAPI server (endpoints: /categories, /search, /{main}/{sub})
-│   └── data/
-│       ├── constants.py            # Category taxonomy, descriptions, compressed taxonomy
-│       ├── db_utils.py             # PostgreSQL helpers (upsert, batch update, grouping via pgvector)
-│       ├── categorize_products.py  # Gemini-based two-stage categorization pipeline
-│       ├── embed_products.py       # Gemini embedding generation + normalization
-│       ├── group_products.py       # Cross-market product grouping by embedding similarity
-│       ├── RateLimiter.py          # Async token-aware rate limiter for Gemini API
-│       ├── text_utils.py           # Shared utilities (normalize_name, get_embeddings_client, normalize_embedding)
-│       ├── run_scrapers.py         # Orchestrator: discovers and runs all scrapers
-│       ├── run_pipeline.py         # Full pipeline runner: scrape → categorize → embed → group
-│       ├── scrapers/               # Market-specific scraping scripts
-│       │   ├── Kam_scraper.py      # KAM market (PDF price lists)
-│       │   ├── Ramstore_scraper.py # Ramstore (web scraping)
-│       │   ├── Reptil_scraper.py   # Reptil (BeautifulSoup + retry, multithreaded)
-│       │   ├── Stokomak_scraper.py # Stokomak (HTML tables)
-│       │   ├── Vero_scraper.py     # Vero (HTML tables, threaded)
-│       │   ├── Zito_scraper.py     # Žito Market (WooCommerce REST API, async)
-│       │   └── kam_pdf_utils.py    # PDF parsing utilities for KAM price lists
-│       ├── deprecated/             # Old/unused scraper versions
-│       └── logs/                   # Scraper run logs
-```
 
 ---
 
@@ -89,7 +55,7 @@ CenaPlus/
 - **API server:** FastAPI on port 8000 (default), CORS allowed for `localhost:8080`
 - **API endpoints:** 
     - `GET /categories`: Returns category taxonomy
-    - `GET /search?q=...`: Semantic vector search (≥0.90 similarity)
+    - `GET /search?q=...`: Semantic vector search (≥0.80 similarity)
     - `GET /{main_category}/{sub_category}?page=&per_page=&market=`: Paginated products
 - **Shared utilities:** `text_utils.py` contains `normalize_name()`, `get_embeddings_client()`, and `normalize_embedding()` — used by both `api.py` (search) and `embed_products.py`
 - **AI integration:** Google Gemini via `google-genai` package; rate-limited with custom async `RateLimiter` (RPM/TPM tracking)
@@ -108,85 +74,32 @@ CenaPlus/
 
 ## Data Pipeline
 
-### 1. Scraping (`run_scrapers.py`)
-
-Run all scrapers sequentially or in parallel:
-
 ```bash
-python -m backend.data.run_scrapers            # sequential
-python -m backend.data.run_scrapers --parallel 6 # concurrent scrapers
-python -m backend.data.run_scrapers --dry-run   # list scrapers without running
-```
-
-Scrapers discover products and call `bulk_upsert_products_table()` to save to the unified `products` table.
-
-### 2. Categorization (`categorize_products.py`)
-
-```bash
-python -m backend.data.categorize_products
-```
-
-Loads uncategorized products from `products` table, classifies them via Gemini (main → sub), and updates the table. Uses `response_schema` for robust batch processing.
-
-### 3. Embedding (`embed_products.py`)
-
-```bash
-python -m backend.data.embed_products
-```
-
-Generates vector embeddings for products where `name_embedding` is NULL. Normalizes names, calls Gemini Embedding 001, stores 768-dim vectors.
-
-### 4. Grouping (`group_products.py`)
-
-```bash
-python -m backend.data.group_products
-```
-
-Groups equivalent products across markets using pgvector cosine similarity. Enforces "one product per market per group" rule. Writes to `groups` table.
-
-### 5. Full Pipeline (`run_pipeline.py`)
-
-```bash
+# Full pipeline: scrape → categorize → embed → group
 python -m backend.data.run_pipeline
-```
 
-Runs all stages: scrapers (parallel) → categorize → embed → group.
-
-### 6. Serving (`api.py`)
-
-```bash
-uvicorn backend.api:app --reload
+# Individual stages
+python -m backend.data.run_scrapers              # sequential
+python -m backend.data.run_scrapers --parallel 6 # concurrent
+python -m backend.data.categorize_products       # Gemini categorization
+python -m backend.data.embed_products            # Generate embeddings
+python -m backend.data.group_products            # Group by similarity
+uvicorn backend.api:app --reload               # Serve API
 ```
 
 ---
 
 ## Docker Deployment
 
-The full stack runs via Docker Compose:
-
-```bash
-docker compose up --build
-```
-
-| Service    | Image                     | Port          | Description                                              |
-| ---------- | ------------------------- | ------------- | -------------------------------------------------------- |
-| `db`       | `pgvector/pgvector:pg18`  | 5454 → 5432  | PostgreSQL with pgvector; init scripts in `init/`        |
-| `backend`  | `python:3.12-alpine`      | 8000          | FastAPI + uvicorn; depends on db health check            |
-| `frontend` | `oven/bun` → `nginx:alpine` | 8080 → 80 | Multi-stage build: Bun builds Vite app, Nginx serves SPA |
+Full stack runs via Docker Compose (`docker compose up --build`). PostgreSQL with pgvector, FastAPI backend (port 8000), Nginx frontend (port 8080). See `docker-compose.yml` for service configuration.
 
 ---
 
 ## Frontend Development
 
-```bash
-bun install          # or npm install
-bun run dev          # starts Vite dev server on port 8080
-bun run build        # production build
-bun run test         # run tests with Vitest
-bun run lint         # ESLint
-```
+`bun install`, `bun run dev` (port 8080), `bun run build`, `bun run test`, `bun run lint`. API base URL via `VITE_API_BASE_URL` env var (default: `http://localhost:8000`).
 
-The API base URL is configurable via `VITE_API_BASE_URL` environment variable (defaults to `http://localhost:8000`).
+---
 
 ---
 
@@ -205,59 +118,18 @@ Market colors are defined in `tailwind.config.ts` and referenced in `src/lib/cat
 
 ---
 
-## Database Schema (Tables & Views)
+## Database Schema
 
-- **`products`** (table) — Unified table for all market products:
-    - `id` (UUID), `name`, `price`, `singular_price` (text/real), `in_stock` (bool)
-    - `market`, `link`, `image`, `description`
-    - `main_category`, `sub_category`, `confidence`, `reasoning`
-    - `name_embedding` (vector(768))
-    - `group_id` (UUID, null), `existing_categories`
-    - `categorized_at`, `ETL_loadtime`, `last_updated`
-
-- **`groups`** (table) — Product groups:
-    - `id`, `name`, `clean_name`, `main_category`, `sub_category`, `name_embedding`
-
-- **`grouped_products`** (view) — Products grouped by equivalence. Defined as:
-
-```sql
-CREATE OR REPLACE VIEW public.grouped_products AS
-SELECT g.id AS group_id,
-    g.name AS group_name,
-    g.main_category,
-    g.sub_category,
-    g.name_embedding,
-    json_agg(json_build_object(
-        'product_id', p.id,
-        'name', p.name,
-        'price', p.price,
-        'market', p.market,
-        'in_stock', p.in_stock,
-        'image', p.image,
-        'link', p.link,
-        'singular_price', p.singular_price
-    ) ORDER BY p.price) AS products
-FROM groups g
-    JOIN products p ON p.group_id = g.id
-WHERE p.in_stock = true
-GROUP BY g.id;
-```
-
-The `name_embedding` column uses pgvector's `vector(768)` type. Grouping uses the `<=>` (cosine distance) operator.
+- **`products`** — Unified table for all markets: name, price, market, embeddings, categories, group assignment
+- **`groups`** — Product groups created by embedding similarity matching
+- **`grouped_products`** (view) — Joins groups with in-stock products, ordered by price
+- Vectors use pgvector's `vector(768)` type; grouping uses `<=>` (cosine distance) operator
 
 ---
 
 ## Environment Variables
 
-| Variable             | Used By  | Description                                                  |
-| -------------------- | -------- | ------------------------------------------------------------ |
-| `POSTGRES_HOST`      | Backend  | PostgreSQL host (default `db` in Docker, `localhost` locally) |
-| `POSTGRES_PORT`      | Backend  | PostgreSQL port (default `5432` inside Docker, `5454` host)  |
-| `POSTGRES_DB`        | Backend  | PostgreSQL database name (default `postgres`)                |
-| `POSTGRES_USER`      | Backend  | PostgreSQL user (default `user`)                             |
-| `POSTGRES_PASSWORD`  | Backend  | PostgreSQL password (default `password`)                     |
-| `GOOGLE_API_KEY`     | Backend  | Google Gemini API key                                        |
-| `VITE_API_BASE_URL`  | Frontend | API base URL (default: `http://localhost:8000`)              |
+See `docker-compose.yml` and `.env.example` for configuration. Key variables: `POSTGRES_*` (database connection), `GOOGLE_API_KEY` (Gemini API), `VITE_API_BASE_URL` (frontend API endpoint).
 
 ---
 
@@ -273,3 +145,5 @@ The `name_embedding` column uses pgvector's `vector(768)` type. Grouping uses th
 8. **Deprecated code:** `backend/data/deprecated/` contains old scraper implementations and a MongoDB-based db_utils — these are not in use.
 9. **Test coverage:** Minimal — only a placeholder test exists. New features should include tests.
 10. **Docker:** The backend uses `python:3.12-alpine` with `requirements-api.txt` (minimal deps). The frontend uses a multi-stage Bun → Nginx build. The DB uses health checks; the backend waits for DB readiness before starting.
+11. **Category taxonomy resolved:** Categories are centrally defined. Refer to `backend/data/constants.py` for the single source of truth (duplicated in `src/lib/categories.ts`).
+12. **Requirements files:** `requirements.txt` (full dependencies), `requirements-api.txt` (API only), `requirements-data.txt` (pipeline with pinned versions).
