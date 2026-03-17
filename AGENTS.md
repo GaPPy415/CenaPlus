@@ -145,5 +145,5 @@ See `docker-compose.yml` and `.env.example` for configuration. Key variables: `P
 8. **Deprecated code:** `backend/data/deprecated/` contains old scraper implementations and a MongoDB-based db_utils — these are not in use.
 9. **Test coverage:** Minimal — only a placeholder test exists. New features should include tests.
 10. **Docker:** The backend uses `python:3.12-alpine` with `requirements-api.txt` (minimal deps). The frontend uses a multi-stage Bun → Nginx build. The DB uses health checks; the backend waits for DB readiness before starting.
-11. **Category taxonomy resolved:** Categories are centrally defined. Refer to `backend/data/constants.py` for the single source of truth (duplicated in `src/lib/categories.ts`).
+11. **Category taxonomy resolved:** Category taxonomy is defined in `shared/categories.json` as the single source of truth. Python loads it via `backend/data/constants.py`, TypeScript imports it via `src/lib/categories.ts`. The sync test `src/test/categories-sync.test.ts` prevents drift.
 12. **Requirements files:** `requirements.txt` (full dependencies), `requirements-api.txt` (API only), `requirements-data.txt` (pipeline with pinned versions).
