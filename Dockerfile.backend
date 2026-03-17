@@ -7,6 +7,7 @@ COPY requirements-api.txt /app/
 RUN pip install --no-cache-dir -r requirements-api.txt
 
 COPY backend /app/backend
+COPY shared /app/shared
 
 EXPOSE 8000
 

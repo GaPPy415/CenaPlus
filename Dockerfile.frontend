@@ -9,6 +9,7 @@ RUN bun install --frozen-lockfile
 COPY index.html vite.config.ts tsconfig*.json tailwind.config.ts postcss.config.js components.json ./
 COPY src ./src
 COPY public ./public
+COPY shared ./shared
 
 RUN bun run build
 
