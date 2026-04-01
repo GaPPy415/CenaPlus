@@ -1,126 +1,186 @@
-import requests
+from backend.data.db_utils import *
 import time
-import json
+import requests
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+from datetime import datetime
 import html
 import uuid
-import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from backend.data.db_utils import *
 
-MAX_WORKERS = 6
-MARKET_NAME = 'zito'
-PER_PAGE = 100
-BASE_URL = 'https://bigshop.mk/wp-json/wc/store/v1/products'
+BASE_URL = "https://zito.proverkanaceni.mk/"
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": "Mozilla/5.0"})
+
+MARKET_NAME = "zito"
+
+products = {}
+products_lock = Lock()
 
 
-def parse_price(price_str: str, minor_unit: int) -> int:
+def get_soup(url: str) -> BeautifulSoup:
+    resp = SESSION.get(url, timeout=10)
+    resp.raise_for_status()
+    return BeautifulSoup(resp.content, "html.parser")
+
+
+def scrape_page(org_id: int, page_num: int) -> dict:
+    """Scrape a single page for a given org and return {product_name: [price, unit_price, category, in_stock]}."""
+    url = f"{BASE_URL}?page={page_num}&perPage=10000&search=&org={org_id}"
+    soup = get_soup(url)
+    table = soup.find("table", class_="table table-bordered table-striped table-hover")
+    if not table:
+        return {}
+
+    tbody = table.find("tbody")
+    if not tbody:
+        return {}
+
+    page_products = {}
+    for row in tbody.find_all("tr"):
+        cols = row.find_all("td")
+        if len(cols) < 5:
+            continue
+
+        product_name = cols[0].text.strip()
+        price = cols[1].text.strip()
+        unit_price = cols[2].text.strip()
+        category = cols[3].text.strip()
+        availability = cols[4].text.strip()
+        in_stock = 1 if "Да" in availability else 0
+
+        # Local merge logic for this page only
+        if product_name not in page_products:
+            page_products[product_name] = [
+                int(price[0:-5]),
+                unit_price,
+                category,
+                in_stock,
+            ]
+        else:
+            if in_stock == 1:
+                page_products[product_name][3] = 1
+
+    return page_products
+
+
+def scrape_market(org_id: int, max_workers_pages: int = 8) -> dict:
+    """Scrape all pages for a given market (org) using threads for pages."""
+    print(f"Scraping market: {org_id}")
+    # First request to get number of products and pages
+    url = f"{BASE_URL}?org={org_id}&search=&perPage=10"
+    soup = get_soup(url)
+
+    # Extract product count
+    p_tag = soup.find("p")
+    if not p_tag:
+        print(f"Could not find product count for market {org_id}")
+        return {}
+
     try:
-        return int(price_str) // (10 ** minor_unit)
-    except (ValueError, TypeError):
-        return 0
+        num_products = int(p_tag.text.strip().split(" ")[-2])
+    except (ValueError, IndexError):
+        print(
+            f"Failed to parse product count for market {org_id}: {p_tag.text.strip()}"
+        )
+        return {}
 
+    num_pages = (num_products // 100) + 1
+    market_products = {}
 
-def parse_product(product: dict) -> tuple[str, list]:
-    name = html.unescape(product.get('name', ''))
-    prices = product.get('prices', {})
-    minor_unit = prices.get('currency_minor_unit', 2)
+    # Parallelize pages
+    with ThreadPoolExecutor(max_workers=max_workers_pages) as executor:
+        future_to_page = {
+            executor.submit(scrape_page, org_id, page_num): page_num
+            for page_num in range(1, num_pages + 1)
+        }
 
-    # Use 'price' which works for both regular and sale
-    price = parse_price(prices.get('price', '0'), minor_unit)
-
-    images = product.get('images', [])
-    image = images[0]['src'] if images else ''
-    link = product.get('permalink')
-
-    # Legacy singular price parsing from original Zito scraper
-    singular_price_raw = product.get('price_html', '')
-    singular_price = None
-    if singular_price_raw:
-        parts = re.split(r'<[^>]+>', singular_price_raw)
-        if len(parts) >= 13:
-            # Reconstruct: index 9 + index 12 + "ден"
-            # Original: singular_price = singular_price[9] + singular_price[12] + "ден"
+        for future in as_completed(future_to_page):
+            page_num = future_to_page[future]
             try:
-                val = parts[9] + parts[12] + "ден"
-                singular_price = val
-            except IndexError:
-                pass
+                page_result = future.result()
+                # Merge page results into market_products
+                for name, values in page_result.items():
+                    if name not in market_products:
+                        market_products[name] = values
+                    else:
+                        # Update stock if any page has it in stock
+                        if values[3] == 1:
+                            market_products[name][3] = 1
+            except Exception as e:
+                print(f"Error scraping org {org_id}, page {page_num}: {e}")
 
-    in_stock = 1 if product.get('is_in_stock') else 0
-    categories = [cat['name'] for cat in product.get('categories', [])]
-
-    return name, [price, image, link, singular_price, categories, in_stock]
-
-
-def fetch_page(page: int):
-    url = f"{BASE_URL}?per_page={PER_PAGE}&page={page}"
-    print(f"Fetching page: {page}")
-    response = requests.get(url)
-    response.raise_for_status()
-
-    raw = response.text
-    # Handle potential PHP warnings before JSON
-    json_start = min(
-        raw.index('{') if '{' in raw else len(raw),
-        raw.index('[') if '[' in raw else len(raw),
-    )
-    return json.loads(raw[json_start:])
+    print(f"Scraped market {org_id}, products in this market: {len(market_products)}")
+    return market_products
 
 
 def main():
     start = time.time()
-
-    # Initial request to get total pages
-    try:
-        url = f"{BASE_URL}?per_page={PER_PAGE}&page=1"
-        response = requests.get(url, timeout=45)
-        # If response is not 200, raise
-        response.raise_for_status()
-
-        total_pages = int(response.headers.get('X-WP-TotalPages', 1))
-    except Exception as e:
-        print(f"Failed to fetch initial page/metadata: {e}")
+    # Get list of markets
+    soup = get_soup(BASE_URL)
+    markets_numbers_select = soup.find_all("select", class_="form-select")
+    if not markets_numbers_select:
+        print("Could not find markets select")
         return
 
-    print(f"Total pages to scrape: {total_pages}")
+    markets_numbers = [
+        int(option["value"])
+        for option in markets_numbers_select[0].find_all("option")[1:]
+        if option.get("value")
+    ]
 
-    all_products = {}
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(fetch_page, page): page for page in range(1, total_pages + 1)}
-        for future in as_completed(futures):
-            page_num = futures[future]
+    print(f"Found {len(markets_numbers)} markets")
+
+    # Thread pool over markets
+    max_workers_markets = 10
+    with ThreadPoolExecutor(max_workers=max_workers_markets) as executor:
+        future_to_org = {
+            executor.submit(scrape_market, org_id): org_id for org_id in markets_numbers
+        }
+
+        for future in as_completed(future_to_org):
+            org_id = future_to_org[future]
             try:
-                products = future.result()
-                # print(f"Scraped page: {page_num}")
-                for product in products:
-                    name, values = parse_product(product)
-                    all_products[name] = values
+                market_products = future.result()
+                # Merge into global products with lock
+                with products_lock:
+                    for name, values in market_products.items():
+                        if name not in products:
+                            products[name] = values
+                        else:
+                            if values[3] == 1:
+                                products[name][3] = 1
+                # print(f"Total unique products so far: {len(products)} (after org {org_id})")
             except Exception as e:
-                print(f"Error scraping page {page_num}: {e}")
+                print(f"Error scraping market {org_id}: {e}")
 
-    print(f"Scraping done in {round(time.time() - start, 2)}s, total products: {len(all_products)}")
+    print(f"Total unique products scraped: {len(products)}")
+    print("Done in ", round(time.time() - start, 2), " seconds")
+
     db = connect_to_db()
     existing_products = get_products_by_market(db, MARKET_NAME)
+    products_to_upsert = []
     now = datetime.now()
 
-    products_to_upsert = []
-    for key, value in all_products.items():
-        existing_id = existing_products.get((key, MARKET_NAME))
-        products_to_upsert.append({
-            'id': existing_id if existing_id else str(uuid.uuid4()),
-            'name': key,
-            'price': value[0],
-            'image': value[1],
-            'link': value[2],
-            'singular_price': value[3],
-            'description': str(value[4]) if value[4] else None,
-            'in_stock': value[5] == 1,
-            'market': MARKET_NAME,
-            'ETL_loadtime': now,
-            'last_updated': now
-        })
+    for key, value in products.items():
+        normalized_name = html.unescape(key)
+        existing_id = existing_products.get((normalized_name, MARKET_NAME))
+        fields = {
+            "id": existing_id if existing_id else str(uuid.uuid4()),
+            "name": key,
+            "price": value[0],
+            "singular_price": value[1],
+            "description": value[2],
+            "in_stock": value[3] == 1,
+            "market": MARKET_NAME,
+            "ETL_loadtime": now,
+            "last_updated": now,
+        }
+        products_to_upsert.append(fields)
 
-    save_products_to_products_table(db, MARKET_NAME, products_to_upsert, set(all_products.keys()))
+    save_products_to_products_table(
+        db, MARKET_NAME, products_to_upsert, set(products.keys())
+    )
     print(f"Overall done in {round(time.time() - start, 2)}s")
 
 

@@ -31,5 +31,6 @@ export const MARKET_INFO: Record<string, { name: string; color: string }> = {
   kam: { name: "КАМ", color: "hsl(var(--market-kam))" },
   ramstore: { name: "Ramstore", color: "hsl(var(--market-ramstore))" },
   vero: { name: "Веро", color: "hsl(var(--market-vero))" },
+  bigshop: { name: "BigShop", color: "hsl(var(--market-bigshop))" },
   stokomak: { name: "Стокомак", color: "hsl(var(--market-stokomak))" },
 };

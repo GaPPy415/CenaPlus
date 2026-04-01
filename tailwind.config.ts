@@ -67,6 +67,7 @@ export default {
           kam: "hsl(var(--market-kam))",
           ramstore: "hsl(var(--market-ramstore))",
           vero: "hsl(var(--market-vero))",
+          bigshop: "hsl(var(--market-bigshop))",
           stokomak: "hsl(var(--market-stokomak))",
         },
       },
