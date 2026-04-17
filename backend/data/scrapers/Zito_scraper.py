@@ -44,6 +44,10 @@ def scrape_page(org_id: int, page_num: int) -> dict:
 
         product_name = cols[0].text.strip()
         price = cols[1].text.strip()
+        # price could be like "0.01 ден", skip products that contain 2 '.' chars
+        if price.count(".") >= 2:
+            print(f"Skipping {product_name}, {price}")
+            continue
         unit_price = cols[2].text.strip()
         category = cols[3].text.strip()
         availability = cols[4].text.strip()
@@ -64,7 +68,7 @@ def scrape_page(org_id: int, page_num: int) -> dict:
     return page_products
 
 
-def scrape_market(org_id: int, max_workers_pages: int = 8) -> dict:
+def scrape_market(org_id: int, max_workers_pages: int = 6) -> dict:
     """Scrape all pages for a given market (org) using threads for pages."""
     print(f"Scraping market: {org_id}")
     # First request to get number of products and pages
@@ -132,7 +136,7 @@ def main():
     print(f"Found {len(markets_numbers)} markets")
 
     # Thread pool over markets
-    max_workers_markets = 10
+    max_workers_markets = 8
     with ThreadPoolExecutor(max_workers=max_workers_markets) as executor:
         future_to_org = {
             executor.submit(scrape_market, org_id): org_id for org_id in markets_numbers

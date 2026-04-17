@@ -1,12 +1,14 @@
 import { MARKET_INFO } from "@/lib/categories";
 import type { GroupedProduct } from "@/lib/api";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, ShoppingCart, Plus, Minus } from "lucide-react";
+import { useCart } from "@/context/CartContext";
 
 interface ProductCardProps {
   group: GroupedProduct;
 }
 
 const ProductCard = ({ group }: ProductCardProps) => {
+  const { items, addItem, updateQuantity } = useCart();
   const sorted = [...group.products].sort((a, b) => a.price - b.price);
   const bestPrice = sorted[0]?.price;
   const firstImage = sorted.find(p => p.image)?.image;
@@ -44,6 +46,8 @@ const ProductCard = ({ group }: ProductCardProps) => {
         {sorted.map((product) => {
           const market = MARKET_INFO[product.market] || { name: product.market, color: "hsl(var(--muted-foreground))" };
           const isBest = product.price === bestPrice && sorted.length > 1;
+          const cartItem = items.find((item) => item.product.product_id === product.product_id);
+          const quantity = cartItem?.quantity || 0;
 
           return (
             <a
@@ -63,9 +67,48 @@ const ProductCard = ({ group }: ProductCardProps) => {
                 </span>
                 <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover/row:opacity-100 transition-opacity flex-shrink-0" />
               </div>
-              <span className={`text-sm font-semibold tabular-nums flex-shrink-0 ${isBest ? 'price-best' : 'text-card-foreground'}`}>
-                {product.price} ден.
-              </span>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span className={`text-sm font-semibold tabular-nums ${isBest ? 'price-best' : 'text-card-foreground'}`}>
+                  {product.price} ден.
+                </span>
+                <div 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  className="flex items-center justify-end w-[84px] h-8"
+                >
+                  {quantity > 0 ? (
+                    <div className="flex items-center h-full w-full bg-background border rounded-full shadow-sm overflow-hidden transition-all">
+                      <button
+                        onClick={() => updateQuantity(product.product_id, quantity - 1)}
+                        className="flex-1 h-full flex items-center justify-center hover:bg-muted/80 active:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="Decrease quantity"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="text-xs font-medium tabular-nums text-center min-w-[1.5rem]">
+                        {quantity}
+                      </span>
+                      <button
+                        onClick={() => updateQuantity(product.product_id, quantity + 1)}
+                        className="flex-1 h-full flex items-center justify-center hover:bg-muted/80 active:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="Increase quantity"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => addItem(product)}
+                      className="h-full w-full px-3 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm rounded-full transition-all flex items-center justify-center gap-1.5 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 translate-x-2 group-hover/row:translate-x-0"
+                    >
+                      <ShoppingCart className="w-3.5 h-3.5" />
+                      <span>Add</span>
+                    </button>
+                  )}
+                </div>
+              </div>
 
               {/* Tooltip */}
               <div className="absolute left-0 right-0 bottom-full mb-1 z-50 pointer-events-none opacity-0 group-hover/row:opacity-100 transition-opacity duration-100">

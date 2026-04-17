@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronRight, Search } from "lucide-react";
 import ThemeToggle from "@/components/ThemeToggle";
+import CartSidebar from "@/components/CartSidebar";
 import { useState } from "react";
 
 const Header = () => {
@@ -62,6 +63,7 @@ const Header = () => {
             </div>
           </form>
           <ThemeToggle />
+          <CartSidebar />
         </div>
       </div>
     </header>
