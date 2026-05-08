@@ -12,4 +12,25 @@ __pycache__/
 init/
 .idea/
 *.ipynb
+*.md
+.gitignore
+*.log
+.DS_Store
+coverage/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+cypress/
+playwright/
+.sisyphus/
+.github/
+README.md
+LICENSE
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+.eslintrc*
+.prettierrc*
+.vscode/
 

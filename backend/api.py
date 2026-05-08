@@ -29,6 +29,11 @@ class PerPage(int, Enum):
     thirty_six = 36
 
 
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+
 @app.get("/categories")
 def get_categories():
     return {k: v for k, v in CATEGORIES.items()}
