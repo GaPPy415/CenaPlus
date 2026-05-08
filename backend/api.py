@@ -15,8 +15,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:8080",
+        "https://cenaplus.net",
+        "https://www.cenaplus.net",
     ],
-    # allow_credentials=True,  # only if using cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
