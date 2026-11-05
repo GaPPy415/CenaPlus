@@ -19,6 +19,7 @@ Start here, then follow the links.
 | [[concepts/pipeline-query-tuning]] | Measured query costs and the indexes that fixed them; what was deliberately left alone. |
 | [[concepts/scraper-api-survey]] | Which markets expose a JSON API (and which dead ends look like one). |
 | [[concepts/manufacturer-resolution]] | How a brand name resolves to one `manufacturers` row: normalise → canonical → alias → `merged_into` chain. |
+| [[concepts/product-name-aliases]] | Token spelling aliases for product names; why grouping is correct but shops split the same product, and the measured effect. |
 
 ## Entities
 

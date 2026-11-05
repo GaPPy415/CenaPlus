@@ -19,6 +19,7 @@ Data pipeline orchestration for CenaPlus: scrape → categorize + extract featur
 | `run_pipeline.py` | Full pipeline runner: runs `run_scrapers.py` → `categorize_products.py` → `extract_features.py` → `embed_products.py` → `group_products.py --apply` sequentially as subprocesses, stops on first failure |
 | `grouping_rules.py` | Variant/normalisation rules (canonical variant, key aliases, unit folding) shared by the grouper and collision tooling |
 | `manufacturer_merges.py` | Alias/merge proposal + apply tool (`propose`, `--csv`, `--apply`, `--pair`) writing `merged_into` |
+| `product_name_aliases.py` | Token-spelling alias proposer/apply tool (`--report`, `--csv`, `--apply`) for `product_name_token_aliases`; the grouper resolves aliases before blocking |
 
 ## Key Conventions
 
@@ -85,6 +86,9 @@ grouping measured 6.7 ms → 0.6 ms per product with the `groups` index.
   extracted features become singleton groups per `(market, raw name)`.
 - `manufacturer_merges.py` maintains `manufacturers.merged_into` / aliases; the API follows those
   chains when resolving `/manufacturer?manufacturer_name=`.
+- `product_name_aliases.py` proposes token-spelling aliases (`алпен`/`алпине` -> `алпин`) into the
+  optional `product_name_token_aliases` table; `group_products.py` rewrites name tokens through it
+  before blocking (no table = no change). The table is not created by the pipeline.
 
 ## Pipeline Commands
 

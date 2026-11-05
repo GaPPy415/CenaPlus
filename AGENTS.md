@@ -99,6 +99,7 @@ needs extraction).
 | `backend/data/scrapers/` | One `{Market}_scraper.py` per market (all subclass `scraper_base.MarketScraper`), auto-discovered by `run_scrapers.py` |
 | `backend/data/grouping_rules.py` | Variant/normalisation rules shared by `group_products.py` and the collision tooling |
 | `backend/data/manufacturer_merges.py` | Manufacturer alias/merge tool (`propose`, `--csv`, `--apply`, `--pair`) writing `merged_into` |
+| `backend/data/product_name_aliases.py` | Token-level product-name spelling aliases (`алпен`/`алпине` → `алпин`); propose/report/apply, resolved by the grouper |
 | `backend/tests/` | stdlib `unittest` suite; no `__init__.py`, so run module paths |
 | `backend/data/logs/` | Per-scraper logs + `run_summary-*.json` (untracked; `*.log` is git-ignored) |
 | `src/` | React SPA; `src/components/ui/` is generated shadcn/ui |

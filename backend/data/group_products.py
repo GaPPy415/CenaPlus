@@ -40,8 +40,9 @@ from backend.data.db_utils import connect_to_db
 from backend.data.grouping_rules import guarded_fuzzy_merge, variants_compatible
 
 FEATURE_ROWS_SQL = """
-    SELECT id, market, manufacturer_id, product_name_sorted, quantity_value, quantity_unit,
-           is_fluid, variant, price, in_stock, main_category, sub_category, name
+    SELECT id, market, manufacturer_id, product_name_key, product_name_sorted,
+           quantity_value, quantity_unit, is_fluid, variant, price, in_stock,
+           main_category, sub_category, name
     FROM products
     WHERE features_extracted_at IS NOT NULL
 """
@@ -67,6 +68,22 @@ UPDATE_PRODUCTS_SQL = """
     FROM (VALUES %s) AS v(id, group_id, main_category, sub_category)
     WHERE p.id = v.id::uuid
 """
+
+
+def load_name_aliases(conn) -> dict[int, dict[str, str]]:
+    """Token alias map from `product_name_token_aliases`, or {} when absent."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('public.product_name_token_aliases')")
+        if cur.fetchone()[0] is None:
+            return {}
+        cur.execute("""
+            SELECT manufacturer_id, alias_token, canonical_token
+            FROM product_name_token_aliases
+        """)
+        aliases: dict[int, dict[str, str]] = defaultdict(dict)
+        for manufacturer_id, alias_token, canonical_token in cur.fetchall():
+            aliases[manufacturer_id][alias_token] = canonical_token
+        return dict(aliases)
 
 
 def build_components(rows: list[dict]) -> list[list[dict]]:
@@ -229,6 +246,23 @@ def main() -> int:
     rows = [row for row in featured if row["product_name_sorted"]]
     unextracted += [row for row in featured if not row["product_name_sorted"]]
     print(f"featured rows: {len(rows):,} | singleton rows: {len(unextracted):,}")
+
+    # reviewed spelling variants: resolve alias tokens -> canonical tokens before blocking
+    aliases = load_name_aliases(conn)
+    resolved = 0
+    for row in rows:
+        table = aliases.get(row["manufacturer_id"])
+        if not table:
+            continue
+        tokens = row["product_name_key"].split()
+        replaced = [table.get(token, token) for token in tokens]
+        if replaced != tokens:
+            row["product_name_key"] = " ".join(replaced)
+            row["product_name_sorted"] = " ".join(sorted(replaced))
+            resolved += 1
+    if aliases:
+        print(f"name aliases: {sum(len(t) for t in aliases.values()):,} loaded | "
+              f"{resolved:,} rows resolved")
 
     started = time.perf_counter()
     blocks: dict[tuple, list[dict]] = defaultdict(list)

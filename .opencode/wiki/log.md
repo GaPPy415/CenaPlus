@@ -168,3 +168,17 @@ New pages: [[entities/api-endpoints]], [[entities/frontend-views]],
   `groups`), the shared rate-limiter scopes, and the real `run_pipeline` stage list.
 - Repo hygiene: `__pycache__`, `*.tsbuildinfo`, `.playwright-mcp/`, `.sisyphus/` and local scratch are
   git-ignored; the applied manufacturer merges live in `.opencode/manual-merges.csv`.
+
+## [2026-11-05] ingest | Product-name token aliases (S2.10 prototype)
+
+- Reproduced the split with Milka Alpenmilch: `чоколадо алпен милк` (spar), `чоколадо алпин милк`
+  (vero), `чоколадо алпине милк` (bigshop) are three groups, so no card compares three markets.
+  `guarded_fuzzy_merge` misses it (`алпен`/`алпине` = 0.727 < 0.85).
+- Full-name aliases failed (the same spelling maps to different canonicals at 80 g vs 250 g); moved to
+  **token** aliases scoped per manufacturer (`product_name_token_aliases`), resolved by the grouper
+  before blocking. Guards: one edit, ≥4 chars, same first letter, no digits, no form/packaging words.
+- Measured with the real `build_components()` before/after, nothing written: Milka 40 aliases /
+  179 rows / −21 groups (391 → 370, 65 rows now compare more markets); all manufacturers 5,130 aliases
+  / 10,306 rows / −653 groups (75,562 → 74,909, 1,914 rows with a wider comparison).
+- New page: [[concepts/product-name-aliases]]; regression suite
+  `backend/tests/test_product_name_aliases.py` (6 tests, 64 total Python tests pass).
