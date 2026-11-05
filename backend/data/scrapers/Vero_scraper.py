@@ -1,131 +1,128 @@
+"""Веро — HTML price list (pricelist.vero.com.mk).
+
+The site is a static export: one index page, one page per shop category and
+`N.html` for the following pages until a 404. Category pages are scraped in
+parallel, and each category walks its pages in small parallel batches (the
+tail of a batch may hit 404s, which simply end the category).
+"""
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
-import html
-import uuid
 
-from backend.data.db_utils import *
+from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
 
-# --- Configuration ---
 BASE_URL = 'https://pricelist.vero.com.mk/'
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Mozilla/5.0"})
-MAX_WORKERS = 10  # Adjust the number of threads as needed
+MAX_WORKERS = 10  # shop categories in parallel
+PAGE_BATCH = 3  # pages of one category in parallel
+MAX_PAGES = 2000
 
 MARKET_NAME = 'vero'
 
-# --- Global shared data ---
-products = {}
-products_lock = Lock()
+
+def fetch_page(page_link: str) -> tuple[int | None, bytes | None]:
+    """GET one page; returns (status, body) or (None, None) on a network error."""
+    try:
+        page = SESSION.get(page_link, timeout=15)
+        return page.status_code, page.content
+    except requests.RequestException as e:
+        print(f"Error fetching {page_link}: {e}")
+        return None, None
 
 
-def scrape_shop(shop_link: str):
-    """Scrapes all pages for a single shop category and returns its products."""
-    shop_products = {}
-    counter = 1
+def parse_page(content: bytes) -> list[ScrapedProduct]:
+    """Rows of one price-list page."""
+    soup = BeautifulSoup(content, 'html.parser')
+    products: list[ScrapedProduct] = []
+
+    for table in soup.find_all('table'):
+        rows = table.find_all('tr')
+        for row in rows[3:-1]:  # Skip header/footer rows
+            cols = [ele.text.strip() for ele in row.find_all('td')]
+            if len(cols) < 5:
+                continue
+
+            try:
+                price = int(cols[1])
+            except ValueError:
+                continue  # Skip if price is not a valid integer
+
+            products.append(
+                ScrapedProduct(
+                    name=cols[0],
+                    price=price,
+                    singular_price=cols[2],
+                    description=cols[4],
+                    in_stock=cols[3] == 'Да',
+                )
+            )
+    return products
+
+
+def scrape_shop(shop_link: str) -> list[ScrapedProduct]:
+    """Scrape all pages for a single shop category and return its products."""
+    shop_products: list[ScrapedProduct] = []
     base_link = shop_link[:-6]  # Removes '1.html' or similar
+    counter = 1
 
-    while True:
-        page_link = base_link + f"{counter}.html"
-        try:
-            page = SESSION.get(page_link, timeout=10)
-            if page.status_code == 404:
-                break  # No more pages in this category
-            page.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+    while counter <= MAX_PAGES:
+        batch = list(range(counter, counter + PAGE_BATCH))
+        links = [f"{base_link}{number}.html" for number in batch]
+
+        with ThreadPoolExecutor(max_workers=len(links)) as executor:
+            responses = list(executor.map(fetch_page, links))
+
+        stop = False
+        for page_link, (status, content) in zip(links, responses):
+            if status is None or status == 404:
+                stop = True  # end of this category (or a broken page)
+                break
+            if status >= 400:
+                print(f"Error fetching {page_link}: HTTP {status}")
+                stop = True
+                break
 
             print(f"Processing shop link: {page_link} -- ")
-            soup = BeautifulSoup(page.content, 'html.parser')
-            tables = soup.find_all('table')
+            shop_products.extend(parse_page(content))
 
-            for table in tables:
-                rows = table.find_all('tr')
-                for row in rows[3:-1]:  # Skip header/footer rows
-                    cols = [ele.text.strip() for ele in row.find_all('td')]
-                    if len(cols) < 5:
-                        continue
-
-                    name = cols[0]
-                    try:
-                        price = int(cols[1])
-                    except ValueError:
-                        continue  # Skip if price is not a valid integer
-
-                    unit_price = cols[2]
-                    in_stock = 1 if cols[3] == 'Да' else 0
-                    category = cols[4]
-
-                    # Use local dictionary to avoid locking on every product
-                    if name not in shop_products:
-                        shop_products[name] = [price, unit_price, category, in_stock]
-
-            counter += 1
-        except requests.RequestException as e:
-            print(f"Error fetching {page_link}: {e}")
-            break  # Stop trying this category on network error
+        if stop:
+            break
+        counter += PAGE_BATCH
 
     return shop_products
 
 
-def main():
-    """Main function to orchestrate the scraping process."""
-    start = time.time()
+class VeroScraper(MarketScraper):
+    market = MARKET_NAME
 
-    # 1. Get all shop category links from the main page
-    index_page = SESSION.get(BASE_URL + "index.html")
-    index_page.raise_for_status()
-    soup = BeautifulSoup(index_page.content, 'html.parser')
+    def fetch(self) -> list[ScrapedProduct]:
+        index_page = SESSION.get(BASE_URL + "index.html")
+        index_page.raise_for_status()
+        soup = BeautifulSoup(index_page.content, 'html.parser')
 
-    shop_links = []
-    for shop in soup.find_all('td'):
-        a_tag = shop.find('a')
-        if a_tag and a_tag.has_attr('href'):
-            shop_links.append(BASE_URL + a_tag['href'])
+        shop_links = []
+        for shop in soup.find_all('td'):
+            a_tag = shop.find('a')
+            if a_tag and a_tag.has_attr('href'):
+                shop_links.append(BASE_URL + a_tag['href'])
 
-    # Exclude first and last two links as in the original script
-    links_to_scrape = shop_links[1:-2]
-    print(f"Found {len(links_to_scrape)} shop categories to scrape.")
+        # Exclude first and last two links as in the original script
+        links_to_scrape = shop_links[1:-2]
+        print(f"Found {len(links_to_scrape)} shop categories to scrape.")
 
-    # 2. Use a thread pool to scrape all categories in parallel
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Submit all scraping tasks
-        future_to_link = {executor.submit(scrape_shop, link): link for link in links_to_scrape}
-
-        for future in as_completed(future_to_link):
-            shop_products = future.result()
-            if shop_products:
-                # Safely merge results into the global dictionary
-                with products_lock:
-                    products.update(shop_products)
+        products: list[ScrapedProduct] = []
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            future_to_link = {
+                executor.submit(scrape_shop, link): link for link in links_to_scrape
+            }
+            for future in as_completed(future_to_link):
+                products.extend(future.result())
                 print(f"Finished shop. Total unique products so far: {len(products)}")
+        return products
 
-    print(f"\nTotal unique products: {len(products)}")
-    print(f"Scraping took {round(time.time() - start, 2)}s")
-    print("Saving to PostgreSQL products table")
-
-    db = connect_to_db()
-    existing_products = get_products_by_market(db, MARKET_NAME)
-    products_to_upsert = []
-    now = datetime.now()
-
-    for key, value in products.items():
-        normalized_name = html.unescape(key)
-        existing_id = existing_products.get((normalized_name, MARKET_NAME))
-        fields = {
-            'id': existing_id if existing_id else str(uuid.uuid4()),
-            'name': key,
-            'price': value[0],
-            'singular_price': value[1],
-            'description': value[2],
-            'in_stock': value[3] == 1,
-            'market': MARKET_NAME,
-            'ETL_loadtime': now,
-            'last_updated': now
-        }
-        products_to_upsert.append(fields)
-
-    save_products_to_products_table(db, MARKET_NAME, products_to_upsert, set(products.keys()))
-    print(f"Overall done in {round(time.time() - start, 2)}s")
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(VeroScraper().run())

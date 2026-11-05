@@ -7,7 +7,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import time
 from backend.data.constants import *
 from psycopg2.extras import execute_values
-from backend.data.RateLimiter import RateLimiter
+from backend.data.RateLimiter import get_rate_limiter
 from backend.data.text_utils import normalize_name, get_embeddings_client, normalize_embedding
 
 load_dotenv(find_dotenv())
@@ -21,7 +21,9 @@ conn = psycopg2.connect(
 )
 
 embeddings = get_embeddings_client()
-rate_limiter = RateLimiter(rpm_limit=2850, tpm_limit=1000000)
+# Embeddings are a different model with its own quota, so a separate scope keeps
+# its window out of the text-model bucket that categorize/extract share.
+rate_limiter = get_rate_limiter(2850, 1_000_000, scope="gemini-embedding")
 
 
 def embed_category_products(category: str, sub_category: str, embeddings: GoogleGenerativeAIEmbeddings, conn: psycopg2.extensions.connection):

@@ -1,10 +1,18 @@
+"""КАМ — PDF price lists per store (kam.com.mk), parsed by ``kam_pdf_utils``."""
+
 import concurrent.futures
-import requests
-from backend.data.db_utils import *
-from kam_pdf_utils import extract_name_price
+import os
+import time
 from datetime import datetime
-import html
-import uuid
+
+import requests
+
+from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
+
+try:  # script mode: `scrapers/` is on sys.path
+    from kam_pdf_utils import extract_name_price
+except ImportError:  # module mode: `python -m backend.data.scrapers.Kam_scraper`
+    from backend.data.scrapers.kam_pdf_utils import extract_name_price
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
@@ -102,6 +110,7 @@ numbers_skopje = [1, 3, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 17, 19, 20, 27, 31, 3
 
 MARKET_NAME = 'kam'
 
+
 def download_pdf(url: str, timeout: int = 30) -> str | None:
     filename = url.split('/')[-1]
     try:
@@ -114,84 +123,80 @@ def download_pdf(url: str, timeout: int = 30) -> str | None:
         # failed download
         return None
 
+
 def merge_products(dest: dict, new: dict) -> None:
     for k, v in new.items():
         dest[k] = v
 
-if __name__ == "__main__":
-    start = time.time()
-    all_products = {}
-    download_futures = {}
-    extract_futures = {}
 
-    # https://kam.com.mk/2025/11/25/73.pdf
-    #  year / month / day / number.pdf
-    year = datetime.now().year
-    month = f"{datetime.now().month:02d}"
-    day = f"{datetime.now().day:02d}"
-    urls = [f'https://kam.com.mk/{year}/{month}/{day}/{n}.pdf' for n in numbers_skopje]
+class KamScraper(MarketScraper):
+    market = MARKET_NAME
 
-    # adjust worker counts to your CPU / network
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as dl_pool, \
-         concurrent.futures.ProcessPoolExecutor(max_workers=4) as proc_pool:
+    def fetch(self) -> list[ScrapedProduct]:
+        start = time.time()
+        all_products: dict = {}
+        download_futures = {}
+        extract_futures = {}
 
-        # submit downloads
-        for url in urls:
-            fut = dl_pool.submit(download_pdf, url)
-            download_futures[fut] = url
+        # https://kam.com.mk/2025/11/25/73.pdf
+        #  year / month / day / number.pdf
+        year = datetime.now().year
+        month = f"{datetime.now().month:02d}"
+        day = f"{datetime.now().day:02d}"
+        urls = [f'https://kam.com.mk/{year}/{month}/{day}/{n}.pdf' for n in numbers_skopje]
 
-        # as downloads finish, submit extraction jobs
-        for dl_done in concurrent.futures.as_completed(download_futures):
-            filename = dl_done.result()
-            url = download_futures[dl_done]
-            if not filename:
-                print(f"Download failed: {url}")
-                continue
-            # submit extraction to process pool
-            ef = proc_pool.submit(extract_name_price, filename)
-            extract_futures[ef] = filename
+        # adjust worker counts to your CPU / network
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as dl_pool, \
+             concurrent.futures.ProcessPoolExecutor(max_workers=4) as proc_pool:
 
-        # collect extraction results and cleanup files
-        for ex_done in concurrent.futures.as_completed(extract_futures):
-            filename = extract_futures[ex_done]
-            try:
-                new_products = ex_done.result(timeout=300)
-                if isinstance(new_products, dict):
-                    merge_products(all_products, new_products)
-                    print(f"Extracted {len(new_products)} from {filename}")
-                else:
-                    print(f"No products from {filename}")
-            except Exception as e:
-                print(f"Extraction failed for {filename}: {e}")
-            finally:
-                # remove temp file
+            # submit downloads
+            for url in urls:
+                fut = dl_pool.submit(download_pdf, url)
+                download_futures[fut] = url
+
+            # as downloads finish, submit extraction jobs
+            for dl_done in concurrent.futures.as_completed(download_futures):
+                filename = dl_done.result()
+                url = download_futures[dl_done]
+                if not filename:
+                    print(f"Download failed: {url}")
+                    continue
+                # submit extraction to process pool
+                ef = proc_pool.submit(extract_name_price, filename)
+                extract_futures[ef] = filename
+
+            # collect extraction results and cleanup files
+            for ex_done in concurrent.futures.as_completed(extract_futures):
+                filename = extract_futures[ex_done]
                 try:
-                    os.remove(filename)
-                except Exception:
-                    pass
+                    new_products = ex_done.result(timeout=300)
+                    if isinstance(new_products, dict):
+                        merge_products(all_products, new_products)
+                        print(f"Extracted {len(new_products)} from {filename}")
+                    else:
+                        print(f"No products from {filename}")
+                except Exception as e:
+                    print(f"Extraction failed for {filename}: {e}")
+                finally:
+                    # remove temp file
+                    try:
+                        os.remove(filename)
+                    except Exception:
+                        pass
 
-    print(f"Total products: {len(all_products)} in {round(time.time() - start, 2)}s")
-    print("Saving to PostgreSQL products table")
+        print(f"Total products: {len(all_products)} in {round(time.time() - start, 2)}s")
 
-    db = connect_to_db()
-    existing_products = get_products_by_market(db, MARKET_NAME)
-    products_to_upsert = []
-    now = datetime.now()
+        return [
+            ScrapedProduct(
+                name=name,
+                price=value[0],
+                singular_price=value[1],
+                # A published price list only lists what is on the shelf today.
+                in_stock=True,
+            )
+            for name, value in all_products.items()
+        ]
 
-    for key, value in all_products.items():
-        normalized_name = html.unescape(key)
-        existing_id = existing_products.get((normalized_name, MARKET_NAME))
-        fields = {
-            'id': existing_id if existing_id else str(uuid.uuid4()),
-            'name': key,
-            'price': value[0],
-            'singular_price': value[1],
-            'in_stock': True,
-            'market': MARKET_NAME,
-            'ETL_loadtime': now,
-            'last_updated': now
-        }
-        products_to_upsert.append(fields)
 
-    save_products_to_products_table(db, MARKET_NAME, products_to_upsert, set(all_products.keys()))
-    print(f"Overall done in {round(time.time() - start, 2)}s")
+if __name__ == "__main__":
+    raise SystemExit(KamScraper().run())

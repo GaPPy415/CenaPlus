@@ -1,13 +1,17 @@
+"""Рамстор — per-store HTML price tables (ramstore.com.mk) parsed with pandas."""
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import pandas as pd
 from tqdm import tqdm
-from backend.data.db_utils import *
-from datetime import datetime
-import html
-import uuid
 
-start = time.time()
+from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
 
 MARKET_NAME = 'ramstore'
+
+#: Each store page is ~7 MB of HTML, so keep concurrency low: the server is not
+#: happy with many parallel downloads (it has fallen over under load).
+MAX_WORKERS = 3
 
 stores = [
     "https://ramstore.com.mk/marketi/ramstore-vardar/",
@@ -39,9 +43,9 @@ stores = [
     # "https://ramstore.com.mk/marketi/ramstore-strumicza-bulevar/"
 ]
 
-df = pd.DataFrame()
-now = datetime.now()
-date_time = now.strftime("%d-%m-%Y")
+#: Column holding the discounted price, when the row has one.
+DISCOUNT_PRICE_COLUMN = 'ЦЕНА СО ПОПУСТ'
+
 
 def extract_dates(period):
     if pd.isna(period) or period == '':
@@ -52,63 +56,79 @@ def extract_dates(period):
     except ValueError:
         return None, None
 
-for store in tqdm(stores):
-    counter = 1
-    store_prefix = store.rsplit('_', 1)[0]
-    store_id = store.rsplit('_', 1)[0].split('marketi/')[1].replace('/', '')
+
+def scrape_store(store: str) -> list[ScrapedProduct]:
+    """Parse one store page into products."""
     df_new = pd.read_html(store)[0]
+    store_id = store.rsplit('_', 1)[0].split('marketi/')[1].replace('/', '')
     df_new["storeId"] = store_id
 
     if df_new.empty:
         print(f"No data found for store: {store}")
-        continue
+        return []
 
     df_new[['promotionDateFrom', 'promotionDateTo']] = df_new['ВРЕМЕТРАЕЊЕ НА АКЦИЈА'].apply(
         lambda x: pd.Series(extract_dates(x))
     )
     df_new = df_new.drop(columns='ВРЕМЕТРАЕЊЕ НА АКЦИЈА')
-    df = pd.concat([df, df_new])
 
-product_col = df.columns[0]
-items_map = {}
-cena_popust = 'ЦЕНА СО ПОПУСТ'
+    product_col = df_new.columns[0]
+    products: list[ScrapedProduct] = []
+    for _, row in df_new.iterrows():
+        name = str(row[product_col]).strip()
+        data = {}
+        for col in df_new.columns:
+            if col == product_col:
+                continue
+            val = row[col]
+            data[col] = None if pd.isna(val) else val
 
-for _, row in df.iterrows():
-    name = str(row[product_col]).strip()
-    data = {}
-    for col in df.columns:
-        if col == product_col:
-            continue
-        val = row[col]
-        data[col] = None if pd.isna(val) else val
-    items_map[name]=[int(data['ПРОДАЖНА ЦЕНА']), data['ОПИС НА ПРОИЗВОД'], data['ЕДИНЕЧНА ЦЕНА']]
+        price = int(data['ПРОДАЖНА ЦЕНА'])
+        if data.get(DISCOUNT_PRICE_COLUMN) is not None:
+            price = int(data[DISCOUNT_PRICE_COLUMN].rsplit(' ', 1)[0][:-3])
 
-    if cena_popust in data.keys() and data[cena_popust] is not None:
-        price = data[cena_popust].rsplit(' ', 1)[0]
-        items_map[name][0]=int(price[:-3])
+        products.append(
+            ScrapedProduct(
+                name=name,
+                price=price,
+                singular_price=data['ЕДИНЕЧНА ЦЕНА'],
+                description=data['ОПИС НА ПРОИЗВОД'],
+                # The store page only lists what is on the shelf today.
+                in_stock=True,
+            )
+        )
+    return products
 
-print(f"Products scraped: {len(items_map)}")
-print(f"Scraping finished in {round(time.time() - start, 3)} seconds.")
 
-db = connect_to_db()
-existing_products = get_products_by_market(db, MARKET_NAME)
-products_to_upsert = []
+class RamstoreScraper(MarketScraper):
+    market = MARKET_NAME
 
-for key, value in items_map.items():
-    normalized_name = html.unescape(key)
-    existing_id = existing_products.get((normalized_name, MARKET_NAME))
-    fields = {
-        'id': existing_id if existing_id else str(uuid.uuid4()),
-        'name': key,
-        'price': value[0],
-        'description': value[1],
-        'singular_price': value[2],
-        'in_stock': True,
-        'market': MARKET_NAME,
-        'ETL_loadtime': now,
-        'last_updated': now
-    }
-    products_to_upsert.append(fields)
+    def fetch(self) -> list[ScrapedProduct]:
+        products: list[ScrapedProduct] = []
+        results: dict[int, list[ScrapedProduct]] = {}
+        failures = 0
 
-save_products_to_products_table(db, MARKET_NAME, products_to_upsert, set(items_map.keys()))
-print(f"Overall done in {round(time.time() - start, 2)}s")
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {
+                executor.submit(scrape_store, store): index
+                for index, store in enumerate(stores)
+            }
+            for future in tqdm(as_completed(futures), total=len(futures), desc=MARKET_NAME):
+                index = futures[future]
+                try:
+                    results[index] = future.result()
+                except Exception as e:
+                    failures += 1
+                    print(f"Failed to parse store {stores[index]}: {e}")
+
+        # Store order, not completion order: the same product can appear in
+        # several stores and the surviving price must not depend on timing.
+        for index in sorted(results):
+            products.extend(results[index])
+
+        print(f"Products scraped: {len(products)} ({failures} stores failed)")
+        return products
+
+
+if __name__ == "__main__":
+    raise SystemExit(RamstoreScraper().run())

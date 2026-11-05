@@ -13,6 +13,7 @@ PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 SCRIPTS = [
     "run_scrapers.py",
     "categorize_products.py",
+    "extract_features.py",
     "embed_products.py",
     "group_products.py",
 ]
@@ -40,6 +41,8 @@ def main() -> int:
         cmd = [sys.executable, str(path)]
         if script == "run_scrapers.py" and num_scrapers > 0:
             cmd += ["--parallel", str(num_scrapers)]
+        if script == "group_products.py":
+            cmd += ["--apply"]
 
         result = subprocess.run(
             cmd,
