@@ -19,46 +19,59 @@ const Header = () => {
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-md border-b border-border">
-      <div className="container max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
-        <Link to="/" className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-2xl">🛒</span>
-          <span className="font-heading font-extrabold text-xl text-foreground tracking-tight">
+    <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-md">
+      <div className="container mx-auto flex max-w-6xl items-center gap-3 px-4 py-4">
+        <Link
+          to="/"
+          aria-label="CenaPlus — почетна"
+          className="flex flex-shrink-0 items-center gap-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span className="text-2xl" aria-hidden="true">
+            🛒
+          </span>
+          <span className="hidden font-heading text-xl font-extrabold tracking-tight text-foreground sm:inline">
             CenaPlus
           </span>
         </Link>
 
-        {mainCat && (
-          <>
-            <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            <Link
-              to={`/?category=${encodeURIComponent(mainCat)}`}
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors truncate"
-            >
-              {mainCat}
-            </Link>
-          </>
-        )}
+        {/* Breadcrumbs are secondary: hidden on phones, truncating on tablets. */}
+        <div className="hidden min-w-0 items-center gap-3 md:flex">
+          {mainCat && (
+            <>
+              <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+              <Link
+                to={`/?category=${encodeURIComponent(mainCat)}`}
+                className="min-w-0 truncate text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {mainCat}
+              </Link>
+            </>
+          )}
 
-        {subCat && (
-          <>
-            <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            <span className="text-sm font-medium text-foreground truncate">
-              {subCat}
-            </span>
-          </>
-        )}
+          {subCat && (
+            <>
+              <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                {subCat}
+              </span>
+            </>
+          )}
+        </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <form onSubmit={handleSearch}>
+        <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2 sm:flex-none">
+          <form onSubmit={handleSearch} className="min-w-0 flex-1 sm:flex-none">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
+              />
               <input
                 type="text"
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
                 placeholder="Пребарај производи..."
-                className="pl-8 pr-3 py-1.5 text-sm rounded-md bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-48 sm:w-64 transition-all"
+                aria-label="Пребарај производи"
+                className="w-full rounded-md border border-border bg-muted py-1.5 pl-8 pr-3 text-sm text-foreground transition-all placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary sm:w-48 lg:w-64"
               />
             </div>
           </form>
