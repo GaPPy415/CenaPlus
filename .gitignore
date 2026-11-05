@@ -12,6 +12,22 @@ dist
 dist-ssr
 *.local
 
+# Python / TS build artifacts
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+
+# Agent tool output (not part of the app)
+.playwright-mcp/
+.sisyphus/
+
+# Local scratch
+nul
+tamaro_products.json
+backend/data/grouper_new.py
+backend/data/ungrouped.py
+backend/data/deprecated/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

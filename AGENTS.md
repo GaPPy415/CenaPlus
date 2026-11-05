@@ -1,149 +1,231 @@
 # CenaPlus — Agent Guidelines
 
-## Project Overview
-
-**CenaPlus** is a Macedonian grocery price comparison web application. It scrapes product data from 6+ supermarket chains in North Macedonia, categorizes and groups equivalent products using AI (Google Gemini), and presents a React frontend where users compare prices side-by-side.
-
-### Architecture
+Macedonian grocery price-comparison app. Twelve market scrapers write into one PostgreSQL `products`
+table; Gemini categorizes and extracts features, embeddings are kept as a search fallback, and grouping
+is deterministic (manufacturer + name + size + variant). FastAPI serves the grouped view to a React SPA.
 
 ```
-Scrapers (6 markets) → PostgreSQL (products table)
-        ↓
-Gemini 2.0 Flash → categorizes into main_category + sub_category
-        ↓
-Gemini Embedding 001 → 768-dim name_embedding vectors
-        ↓
-pgvector cosine similarity → groups table → grouped_products view
-        ↓
-FastAPI serves grouped_products → React frontend displays price comparisons
+scrape → categorize + extract features (gemini-3.1-flash-lite)
+       → embed (gemini-embedding-001, 768d, search fallback)
+       → group (deterministic) → FastAPI → React
 ```
 
-## Tech Stack
+## Commands
 
-| Layer      | Technologies                                                                                     |
-| ---------- | ------------------------------------------------------------------------------------------------ |
-| Frontend   | React 18, TypeScript, Vite, TanStack React Query, shadcn/ui (Radix), Tailwind CSS, next-themes   |
-| Backend    | Python 3, FastAPI, psycopg2, PostgreSQL with pgvector extension                                  |
-| AI/ML      | Google Gemini 2.0 Flash (categorization), Gemini Embedding 001 (vector embeddings)               |
-| Scrapers   | BeautifulSoup, aiohttp, requests, pandas, concurrent.futures                                     |
-| Testing    | Vitest, @testing-library/react, jsdom                                                            |
-| Tooling    | ESLint (flat config), PostCSS, Autoprefixer, Bun (lockfile)                                      |
-| Deployment | Docker Compose, Nginx (frontend static serving), python:3.12-alpine (backend), oven/bun (build)  |
+Run everything from the repo root.
 
----
+**Frontend** (Bun — `bun.lockb` is the lockfile the Docker build consumes):
 
-## Key Conventions
+- `bun install`, `bun run dev` — Vite on :8080, proxies `/api/*` → `http://127.0.0.1:8000/*` (prefix stripped)
+- `bun run test` / `bun run test:watch` — single file: `bunx vitest run src/test/categories-sync.test.ts`
+- `bunx tsc -b` — the **only** typecheck. `bun run build` is `vite build` and does not typecheck.
+- `bun run lint` — currently 0 errors, 7 pre-existing `react-refresh` warnings
 
-### Frontend
+**API / pipeline:**
 
-- **Path alias:** `@/` maps to `./src/` (configured in tsconfig and vite)
-- **Styling:** Tailwind CSS with HSL CSS variables. Custom `market-*` color tokens for each store. Dark mode via `class` strategy (next-themes)
-- **Fonts:** DM Sans (body), Inter (headings)
-- **State management:** URL search params (`useSearchParams`) drive navigation; TanStack React Query handles server state
-- **Component library:** shadcn/ui — components live in `src/components/ui/` and are customized Radix primitives
-- **TypeScript:** Relaxed strictness (`noImplicitAny: false`, `strictNullChecks: false`)
-- **Testing:** Vitest with jsdom environment, `@testing-library/react` for component tests. Tests in `src/**/*.{test,spec}.{ts,tsx}`
-- **Search:** Header contains a search bar. On submit, navigates to `/search?q=...` which uses semantic vector search via the API
-- **Market filtering:** SubCategoryView has per-market toggle buttons to filter displayed products
-- **Pagination:** First/last page buttons, numbered pages with ellipsis, custom "go to page" input field
-- **Product hover:** Each product row in ProductCard shows a tooltip on hover with full name, singular price, and in-stock/out-of-stock status (instant appearance, no delay)
+- `uvicorn backend.api:app --reload`
+- `python -m backend.data.run_scrapers [--parallel N] [--dry-run]`
+- `python -m backend.data.categorize_products` / `.extract_features` / `.embed_products` / `.group_products --apply`
+- Full pipeline: `python backend/data/run_pipeline.py`
 
-### Backend
+## Gotchas
 
-- **Database:** PostgreSQL with pgvector extension for vector similarity search. Single `products` table for all markets.
-- **Connection:** Single shared `psycopg2` connection via `connect_to_db()`, env vars: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
-- **API server:** FastAPI on port 8000 (default), CORS allowed for `localhost:8080`
-- **API endpoints:** 
-    - `GET /categories`: Returns category taxonomy
-    - `GET /search?q=...`: Semantic vector search (≥0.80 similarity)
-    - `GET /{main_category}/{sub_category}?page=&per_page=&market=`: Paginated products
-- **Shared utilities:** `text_utils.py` contains `normalize_name()`, `get_embeddings_client()`, and `normalize_embedding()` — used by both `api.py` (search) and `embed_products.py`
-- **AI integration:** Google Gemini via `google-genai` package; rate-limited with custom async `RateLimiter` (RPM/TPM tracking)
-- **Categorization:** Two-stage pipeline — first classify into main category, then subcategory. Uses Pydantic models with `response_schema` for structured Gemini output (JSON schema enforcement).
-- **Embeddings:** Product names normalized (Cyrillic transliteration, alphabetical word sort), embedded with Gemini Embedding 001 (768 dimensions), L2-normalized, stored in pgvector
-- **Grouping:** Cosine similarity matching (default 0.95). One product per market per group enforced. Solo products get their own group.
-- **Scrapers:** Standalone scripts in `backend/data/scrapers/`. All scrapers upsert to the shared `products` table.
+1. **`python -m backend.data.run_pipeline` fails** (`ModuleNotFoundError: No module named 'run_scrapers'`).
+   `run_pipeline.py` imports `run_scrapers` unqualified, so it only works in script mode, where
+   `sys.path[0]` is `backend/data/`. The other stages work with `-m`.
+2. **No package `__init__.py` files anywhere** — everything relies on namespace packages plus
+   `PYTHONPATH`. Always import absolutely (`from backend.data.db_utils import ...`).
+3. **Scrapers are launched as standalone scripts**, not modules: `run_scrapers.py` spawns each
+   `*_scraper.py` with `cwd=scrapers/` and `PYTHONPATH=<root>:<scrapers/>`. So a scraper imports
+   siblings unqualified (`from kam_pdf_utils import ...`) and project code absolutely.
+4. **The DB schema lives in `init/00_schema.sql`** — one idempotent file that creates the
+   extensions (`uuid-ossp`, `vector`), all four tables, constraints, every index, the timestamp
+   trigger and the `grouped_products` view. It is a *fresh-database bootstrap*: apply schema
+   changes to a live DB with explicit statements, then fold them back into that file.
+5. `backend/api.py` connects to Postgres **at import time** — importing it (or `pytest`-collecting it)
+   needs a reachable DB. The Gemini client is lazy, so `GOOGLE_API_KEY` is only required for
+   `/search/semantic` and the pipeline stages.
+6. `VITE_API_BASE_URL` defaults to `/api` (relative), not `http://localhost:8000`. Dev uses the Vite
+   proxy, production uses nginx — both strip the `/api` prefix.
+7. `nginx.conf` gates `/api/` on `valid_referers` (localhost, `(www.)cenaplus.net`) and rate-limits
+   `10r/s` burst 10 per IP. Direct `curl` / non-browser clients get **403**; that is intentional.
+8. `Dockerfile.frontend` runs `bun install --frozen-lockfile`. Add deps with `bun add` and commit
+   `bun.lockb`; `package-lock.json` also exists but is not used by the build.
+9. `docker-compose.yml` publishes **no port for the backend**; the frontend container is the only
+   entrypoint (`:8080`) and proxies `/api/` to `backend:8000`. For host-side dev use uvicorn directly.
+10. `.dockerignore` excludes `*.md`, `deprecated/` and `init/` (init is mounted by compose, not baked).
+11. All Gemini calls go through `RateLimiter` (`get_rate_limiter(...)`). The two text-model stages
+    (`categorize_products.py`, `extract_features.py`) share one scope, so the rolling 60 s window is
+    carried across the `run_pipeline.py` subprocess boundary; `embed_products.py` has its own
+    `gemini-embedding` scope. Budgets come from `GEMINI_RPM_LIMIT` / `GEMINI_TPM_LIMIT` (defaults
+    3850 RPM / 3.85M TPM) and are lowered automatically to the `quotaValue` the server reports in a
+    429. Do not bypass `await rate_limiter.acquire(tokens)` — use `call_with_retries(...)` instead.
+12. Two Gemini clients coexist by design: `text_utils.py` uses the langchain
+    `GoogleGenerativeAIEmbeddings` wrapper; `categorize_products.py` uses the raw `google-genai` client
+    with Pydantic `response_schema`. Don't unify them.
+13. `products.etl_loadtime` = when the row **first** entered the warehouse (never rewritten);
+    `products.last_updated` = when a **scraped** field last actually changed. `bulk_upsert_products_table`
+    enforces both in SQL and a `BEFORE INSERT OR UPDATE` trigger (`init/00_schema.sql`)
+    enforces them for direct writes. Pipeline stages (categorization, embeddings, grouping) must not
+    bump either one. Both are naive `timestamp` columns written with Python local time while the DB
+    session runs `Etc/UTC`, so never author these from SQL `now()`; see the migration comment.
 
-### Language & Locale
+## Pipeline stages are incremental (grouping is a full rebuild)
 
-- All product names, categories, and subcategories are in **Macedonian Cyrillic**
-- Category constants are duplicated between `backend/data/constants.py` (Python) and `src/lib/categories.ts` (TypeScript) — keep them in sync
-- The `cyrtranslit` library is used for Latin↔Cyrillic transliteration in the embedding pipeline
+- Scrapers upsert by market and mark unseen names out of stock (`mark_out_of_stock_products_table`).
+  An upsert whose rows are unchanged writes nothing at all (see gotcha 13).
+- `categorize_products.py` re-picks rows with `main_category IS NULL`, `confidence IS NULL` or `< 0.5`.
+- `extract_features.py` re-picks rows missing the extracted fields and writes `manufacturer_id`,
+  `product_name_sorted`, `quantity_value/unit`, `is_fluid`. A batch that fails stays unsaved so the
+  next run retries it (no `Разно`/0.0 fallback).
+- `embed_products.py` only touches rows with `name_embedding IS NULL`. The vectors are now a **search
+  fallback**; grouping no longer uses them.
+- `group_products.py` is **not** incremental: it requires `--dry-run` or `--apply`, and `--apply`
+  truncates `groups`, rewrites every `products.group_id`, and seeds singleton groups for rows without
+  extracted features. Grouping is deterministic — blocks of (manufacturer, canonical name, quantity,
+  unit, fluid) refined by the variant rules in `grouping_rules.py`; same-market rows merge only when
+  their variants are compatible. There are no similarity thresholds.
 
----
+Re-running any stage is safe; running them out of order is not (extraction needs categories, grouping
+needs extraction).
 
-## Data Pipeline
+## Layout
 
-```bash
-# Full pipeline: scrape → categorize → embed → group
-python -m backend.data.run_pipeline
+| Path | Owns |
+| ---- | ---- |
+| `shared/categories.json` | **Single source of truth** for the taxonomy (21 main, 120 sub) |
+| `backend/api.py` | FastAPI: `/health`, `/categories`, `/search` (pg_trgm fuzzy), `/search/semantic` (embedding fallback), `/product?g_id=` (detail), `/manufacturer?manufacturer_name=` (all groups by brand), `/{main}/{sub}` |
+| `backend/data/` | Pipeline stage scripts (`categorize_products`, `extract_features`, `embed_products`, `group_products`), `db_utils.py`, `text_utils.py`, `RateLimiter.py` |
+| `backend/data/scrapers/` | One `{Market}_scraper.py` per market (all subclass `scraper_base.MarketScraper`), auto-discovered by `run_scrapers.py` |
+| `backend/data/grouping_rules.py` | Variant/normalisation rules shared by `group_products.py` and the collision tooling |
+| `backend/data/manufacturer_merges.py` | Manufacturer alias/merge tool (`propose`, `--csv`, `--apply`, `--pair`) writing `merged_into` |
+| `backend/tests/` | stdlib `unittest` suite; no `__init__.py`, so run module paths |
+| `backend/data/logs/` | Per-scraper logs + `run_summary-*.json` (untracked; `*.log` is git-ignored) |
+| `src/` | React SPA; `src/components/ui/` is generated shadcn/ui |
+| `init/` | `00_schema.sql` — the whole schema (extensions, tables, indexes, trigger, view), mounted into `docker-entrypoint-initdb.d` |
 
-# Individual stages
-python -m backend.data.run_scrapers              # sequential
-python -m backend.data.run_scrapers --parallel 6 # concurrent
-python -m backend.data.categorize_products       # Gemini categorization
-python -m backend.data.embed_products            # Generate embeddings
-python -m backend.data.group_products            # Group by similarity
-uvicorn backend.api:app --reload               # Serve API
-```
+Per-directory detail: `backend/data/AGENTS.md`, `backend/data/scrapers/AGENTS.md`.
 
----
+## Markets
 
-## Docker Deployment
+Keys must match the `market` column, `MARKET_INFO` in `src/lib/categories.ts`, and the `--market-*`
+tokens in `tailwind.config.ts`.
 
-Full stack runs via Docker Compose (`docker compose up --build`). PostgreSQL with pgvector, FastAPI backend (port 8000), Nginx frontend (port 8080). See `docker-compose.yml` for service configuration.
+| Key | Scraper | Method |
+| --- | ------- | ------ |
+| `reptil` | `Reptil_scraper.py` | WooCommerce Store API (marketonline.mk) |
+| `bigshop` | `Bigshop_scraper.py` | WooCommerce Store API (bigshop.mk) |
+| `zito` | `Zito_scraper.py` | HTML (zito.proverkanaceni.mk) |
+| `stokomak` | `Stokomak_scraper.py` | HTML (stokomak.proverkanaceni.mk) |
+| `vero` | `Vero_scraper.py` | HTML price list (pricelist.vero.com.mk) |
+| `ramstore` | `Ramstore_scraper.py` | HTML per store page (16 stores) + pandas |
+| `kam` | `Kam_scraper.py` | PDF price lists (camelot, pdfplumber fallback) |
+| `dim` | `Dim_scraper.py` | AJAX price list on `ceni.zur.mk` (the iframe behind dim.mk/cenovnik), one request per store |
+| `zur` | `Zur_scraper.py` | Same ZUR platform as `dim`, own store list (`ceni.zur.mk`), one request per store |
+| `elida` | `Elida_scraper.py` | Same proverkanaceni.mk platform as `zito`/`stokomak` (100-row pages, 43 stores) |
+| `spar` | `Spar_scraper.py` | JSON API `api.prod.spar.mk` (behind spar.mk/pricelist), Skopje stores only; names transliterated to Cyrillic |
+| `kipper` | `Kipper_scraper.py` | `admin-ajax.php` action `get_products_data` per store (Skopje city term), products via WP REST |
 
----
+## Frontend conventions
 
-## Frontend Development
+- Routing is **query-param based**, not path based: `/?category=<main>&sub=<sub>` renders
+  `SubCategoryView`. Only routes are `/`, `/search`, `/product`, `/manufacturer`, `*`. `ProductCard`
+  links to `/product?g_id=<uuid>`; the detail page is the only place out-of-stock offers are shown.
+  The manufacturer chip there links to `/manufacturer?manufacturer_name=<canonical>`.
+- Page state (`page`, `per_page` 12|24|36, market toggles) is local component state in
+  `SubCategoryView`, not URL state; only category selection is in the URL. `ManufacturerView` keeps
+  `manufacturer_name`, `page` and `per_page` in the URL so a brand listing is linkable.
+- `src/components/Pagination.tsx` is shared by both listings (first/prev/numbered/next/last +
+  go-to-page). `ProductCard` takes `showCategory` to render the main-category chip, which is what
+  distinguishes a manufacturer listing (spans categories) from a subcategory listing.
+- Server state via TanStack Query (`src/lib/api.ts` is the only fetch layer); the API returns
+  `{ total, page, per_page, data }` for listings and `{ data }` for search.
+- `/search` is **pg_trgm fuzzy matching** over `groups.product_name` + manufacturer names
+  (similarity ≥ 0.8, ordered by similarity, no row cap); `/search/semantic` keeps the old
+  768-dim cosine path as a fallback and is the only endpoint needing `GOOGLE_API_KEY`.
+- Cart is frontend-only: `src/context/CartContext.tsx` persists to `localStorage["cenaplus_cart"]`.
+  There is no cart API or checkout.
+- All UI copy, categories and product names are Macedonian Cyrillic. Keep new strings Cyrillic.
+- `@/` → `src/`. TypeScript is deliberately loose (`strict: false`, `noImplicitAny: false`).
 
-`bun install`, `bun run dev` (port 8080), `bun run build`, `bun run test`, `bun run lint`. API base URL via `VITE_API_BASE_URL` env var (default: `http://localhost:8000`).
+## Environment
 
----
+`.env` at the repo root (loaded by `dotenv`, resolved from the cwd — stage scripts are spawned with
+`cwd=backend/data`, so the parent search finds it): `POSTGRES_HOST/PORT/DB/USER/PASSWORD`,
+`GOOGLE_API_KEY`, `VITE_API_BASE_URL`.
 
----
+Host-side Docker map: Postgres on `localhost:5454` (`POSTGRES_PORT`), API on `:8000` from uvicorn,
+frontend on `:8080`.
 
-## Supported Markets
+Dependency files: `requirements.txt` (full), `requirements-api.txt` (what the backend image installs),
+`backend/data/requirements-data.txt` (pinned pipeline deps, incl. `pdfplumber`/`lxml`).
 
-| Key        | Display Name  | Color     | Scraper                  | Method                     |
-| ---------- | ------------- | --------- | ------------------------ |----------------------------|
-| `reptil`   | Reptil        | `#028261` | `Reptil_scraper.py`      | WooCommerce REST API       |
-| `zito`     | Жито Маркет   | `#00ae41` | `Zito_scraper.py`        | WooCommerce REST API       |
-| `kam`      | КАМ           | `#ea1a24` | `Kam_scraper.py`         | PDF price list parsing     |
-| `ramstore` | Рамстор       | `#f78223` | `Ramstore_scraper.py`    | Web scraping + pandas      |
-| `stokomak` | Стокомак      | `#f8d000` | `Stokomak_scraper.py`    | HTML table scraping        |
-| `vero`     | Веро          | `#eb1c26` | `Vero_scraper.py`        | HTML table scraping        |
+## Known state
 
-Market colors are defined in `tailwind.config.ts` and referenced in `src/lib/categories.ts` as `MARKET_INFO`.
+- Tests: 8 Python `unittest` modules in `backend/tests/` (run as module paths, no `__init__.py`) and
+  2 Vitest files. `src/test/categories-sync.test.ts` asserts the TS taxonomy matches
+  `shared/categories.json` and has exactly 21 main categories — update both sides together.
+- No CI, no migration tool (schema is bootstrapped by `init/00_schema.sql`; live changes are applied
+  by hand and folded back into that file), no auth
+  (CORS: `localhost:8080`, `cenaplus.net`, `www.cenaplus.net`).
+- Local scratch that is not part of the app: `shto.*`, `tamaro_products.json`, `nul`,
+  `backend/data/grouper_new.py`, `backend/data/ungrouped.py`, `backend/data/deprecated/`.
 
----
+<!-- BEGIN opencode-rag -->
+## Code Navigation
 
-## Database Schema
+ALWAYS use OpenCodeRAG tools before reading or editing:
+- **Search first** — `search_semantic(query)` instead of grep/glob
+- **Skeleton before read** — `get_file_skeleton(filePath)` then read specific lines
+- **Usages before edit** — `find_usages(symbolName)` before modifying any symbol
+- **Images via describe** — `describe_image(filePath, systemPrompt?)` — never read raw bytes
+- **Recall quirks** — `recall_quirks(query)` when you hit a known pitfall
+- **Add quirks** — `add_quirk(content)` when you discover a non-obvious fact
+- **Fix quirks** — `update_quirk(id, ...)` / `delete_quirk(id)` when a stored quirk is outdated or wrong
 
-- **`products`** — Unified table for all markets: name, price, market, embeddings, categories, group assignment
-- **`groups`** — Product groups created by embedding similarity matching
-- **`grouped_products`** (view) — Joins groups with in-stock products, ordered by price
-- Vectors use pgvector's `vector(768)` type; grouping uses `<=>` (cosine distance) operator
+If no results, run `opencode-rag index`.
 
----
+### Decision tree — ALWAYS follow this order
+1. User mentions code behavior/architecture → `search_semantic(query)`
+2. User mentions a file path → `get_file_skeleton(filePath)` THEN `read` on specific lines
+3. User mentions a function/class/variable to edit → `find_usages(symbolName)` THEN `search_semantic` THEN `edit`
+4. User asks a code question → `search_semantic` to gather context before answering
+5. User asks about an image or visual asset → `describe_image(filePath)` (optionally pass `systemPrompt` to focus on specific features) to retrieve its generated description, then optionally `search_semantic` for related code
+6. You encounter an error or need to recall a known pitfall → `recall_quirks(query)`
+7. You discover a non-obvious fact or workaround → `add_quirk(content)` to persist it for future sessions
+8. A recalled quirk is outdated or wrong → `update_quirk(id, ...)` to fix it, or `delete_quirk(id)` if it no longer applies
 
-## Environment Variables
+### Proactive triggers — you MUST call these tools when
+- User asks about code behavior, architecture, or implementation details
+- User asks to edit, refactor, or fix code — call `find_usages` first
+- User references files or functions you haven't read yet
+- User says "find", "search", "look up", "where is", "how does"
+- User refers to an image, screenshot, diagram, or visual asset
+- Before answering ANY code-related question, retrieve context first
+- Before reading ANY file, call `get_file_skeleton` to orient first
 
-See `docker-compose.yml` and `.env.example` for configuration. Key variables: `POSTGRES_*` (database connection), `GOOGLE_API_KEY` (Gemini API), `VITE_API_BASE_URL` (frontend API endpoint).
+### Anti-patterns — NEVER do these
+- Reading full files without calling `get_file_skeleton` first (wastes tokens)
+- Editing a function without calling `find_usages` first (breaks call sites)
+- Answering code questions without calling `search_semantic` first (you guess at behavior)
+- Using `grep`/`glob` when `search_semantic` would find the answer faster
+- Treating image files as text — use `describe_image` instead of reading raw bytes
+- Using `npx opencode-rag quirk` shell commands instead of the built-in quirk tools (`add_quirk` / `recall_quirks` / `update_quirk` / `delete_quirk`) (the tools are faster, already loaded in-process, and go through the trust monitor)
 
----
+### MANDATORY quirk capture rules — you MUST call `add_quirk` when
+- A build, test, or type-check command fails and you resolve it
+- You discover an undocumented library constraint, peer dep, or workaround
+- You learn an environment-specific requirement (OS, tool version, etc.)
+- You make a design decision that future sessions should remember
+- You resolve a gotcha that cost more than one attempt
 
-## Important Notes for Agents
+### MANDATORY quirk hygiene — you MUST call `update_quirk` or `delete_quirk` when
+- A stored quirk is outdated, wrong, or has been fixed — update it or delete it instead of adding a contradicting duplicate
+- NEVER finish a coding session without adding quirks for resolved errors.
 
-1. **Category sync:** The category taxonomy exists in two places — `backend/data/constants.py` and `src/lib/categories.ts`. Any changes must be applied to both files.
-2. **Scraper pattern:** New scrapers should follow the existing `{Market}_scraper.py` naming convention and call `save_products_to_products_table()` for persistence. They will be auto-discovered by `run_scrapers.py`.
-3. **Embedding normalization:** Product names are transliterated to Cyrillic (`cyrtranslit.to_cyrillic`), lowercased, and words sorted alphabetically before embedding. The shared `normalize_name()` in `text_utils.py` must be used consistently in both `embed_products.py` and `api.py` search.
-4. **Shared embedding client:** `get_embeddings_client()` and `normalize_embedding()` in `text_utils.py` are used by both the API (search) and the embedding pipeline. Do not duplicate this initialization.
-5. **Rate limiting:** All Gemini API calls go through `RateLimiter` with conservative limits (3K RPM, batches of 100). Respect RPM/TPM budgets when adding new AI features.
-6. **pgvector dependency:** The PostgreSQL instance must have the `pgvector` extension installed. The Docker Compose setup uses `pgvector/pgvector:pg18` image which includes it.
-7. **No authentication:** The API currently has no auth. CORS is restricted to `localhost:8080`.
-8. **Deprecated code:** `backend/data/deprecated/` contains old scraper implementations and a MongoDB-based db_utils — these are not in use.
-9. **Test coverage:** Minimal — only a placeholder test exists. New features should include tests.
-10. **Docker:** The backend uses `python:3.12-alpine` with `requirements-api.txt` (minimal deps). The frontend uses a multi-stage Bun → Nginx build. The DB uses health checks; the backend waits for DB readiness before starting.
-11. **Category taxonomy resolved:** Category taxonomy is defined in `shared/categories.json` as the single source of truth. Python loads it via `backend/data/constants.py`, TypeScript imports it via `src/lib/categories.ts`. The sync test `src/test/categories-sync.test.ts` prevents drift.
-12. **Requirements files:** `requirements.txt` (full dependencies), `requirements-api.txt` (API only), `requirements-data.txt` (pipeline with pinned versions).
+### Long-running commands
+Long-running commands:
+- Any `shell` call expected to take more than 30s MUST set `background: true` (returns immediately; the session is notified on completion) or set an explicit `timeout` (ms).
+- Default foreground timeout: 120000ms. Never run builds/tests/indexes in the foreground beyond 30s; if a call is already running, press Ctrl+B to background it (OpenCode: `session.background`).
+- OpenCodeRAG measures foreground shell duration and records a quirk when a call exceeds the threshold, so repeated foreground runs become visible.
+<!-- END opencode-rag -->
