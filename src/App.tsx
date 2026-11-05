@@ -9,6 +9,8 @@ import Header from "@/components/Header";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import SearchResults from "./pages/SearchResults";
+import ProductDetail from "./pages/ProductDetail";
+import ManufacturerView from "./pages/ManufacturerView";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +26,8 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/search" element={<SearchResults />} />
+            <Route path="/product" element={<ProductDetail />} />
+            <Route path="/manufacturer" element={<ManufacturerView />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
