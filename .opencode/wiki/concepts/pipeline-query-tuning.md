@@ -1,8 +1,8 @@
 ---
 title: Pipeline query tuning
 tags: [postgres, performance, indexes, grouping, upsert]
-sourceRefs: [backend/data/db_utils.py, init/04_pipeline_indexes.sql]
-lastReviewed: 2026-11-03
+sourceRefs: [backend/data/db_utils.py, init/00_schema.sql]
+lastReviewed: 2026-11-05
 ---
 
 # Pipeline query tuning
@@ -20,9 +20,13 @@ Measurements taken on the dev DB (142,539 products / 61,102 groups, ~765 MB, all
 | Categorization validation | reads 117k rows into Python | SQL `NOT EXISTS` against the taxonomy | no Python round trip |
 | Re-scrape of unchanged data | rewrites every row | writes nothing | `ON CONFLICT ... WHERE row IS DISTINCT FROM excluded` |
 
-The grouping stage is still O(n²) per sub-category: each product scans the sub-category's ungrouped
-neighbours. The indexes cut the constant, not the complexity — `grouper_new.py` (untracked) is the
-algorithmic fix and is not wired in.
+The grouping stage was O(n²) per sub-category: each product scanned the sub-category's ungrouped
+neighbours. The indexes cut the constant, not the complexity. That similarity path has since been
+replaced by the deterministic grouper (`group_products.py`); the measurements remain useful for the
+embedding scan, which still filters `group_id IS NULL AND name_embedding IS NOT NULL`.
+
+The indexes originally shipped as `init/04_pipeline_indexes.sql`; they now live in
+`init/00_schema.sql`, the single idempotent schema file.
 
 ## Deliberately not optimised
 

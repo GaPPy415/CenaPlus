@@ -1,8 +1,8 @@
 ---
 title: Product timestamps
 tags: [products, etl, timestamps, postgres, data-quality]
-sourceRefs: [backend/data/db_utils.py, init/03_product_timestamps.sql, backend/tests/test_product_timestamps.py]
-lastReviewed: 2026-11-03
+sourceRefs: [backend/data/db_utils.py, init/00_schema.sql, backend/tests/test_product_timestamps.py]
+lastReviewed: 2026-11-05
 ---
 
 # Product timestamps: `etl_loadtime` vs `last_updated`
@@ -46,9 +46,9 @@ Two layers, deliberately redundant:
    that `ETL_loadtime = target.ETL_loadtime` (first-seen wins) and
    `last_updated = CASE WHEN <watched row> IS DISTINCT FROM <EXCLUDED row> THEN EXCLUDED.last_updated ELSE target.last_updated END`.
    Row comparison is NULL-safe, so a `NULL` -> `NULL` field is not a change.
-2. **Database** — `init/03_product_timestamps.sql` adds `DEFAULT now()`, `NOT NULL`, and the
-   `products_set_timestamps_trg` trigger for direct/ad-hoc writes. It forces `etl_loadtime` to the old
-   value and suppresses `last_updated` when nothing watched changed.
+2. **Database** — `init/00_schema.sql` (originally applied as `init/03_product_timestamps.sql`) adds
+   `DEFAULT now()`, `NOT NULL` and the `products_set_timestamps_trg` trigger for direct/ad-hoc writes.
+   It forces `etl_loadtime` to the old value and suppresses `last_updated` when nothing watched changed.
 
 ## Timezone trap
 
