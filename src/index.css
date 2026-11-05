@@ -1,8 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
 
 @layer base {
   :root {
@@ -53,6 +53,11 @@
     --market-vero: 357 85% 52%;
     --market-stokomak: 50 100% 49%;
     --market-bigshop: 28 94% 55%;
+    --market-dim: 206 4% 66%;
+    --market-zur: 57 100% 50%;
+    --market-elida: 218 63% 28%;
+    --market-spar: 146 100% 29.2%;
+    --market-kipper: 358 85% 52%;
 
     --price-best: 142 55% 40%;
     --price-worst: 0 60% 55%;

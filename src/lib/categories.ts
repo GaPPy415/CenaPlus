@@ -33,4 +33,9 @@ export const MARKET_INFO: Record<string, { name: string; color: string }> = {
   vero: { name: "Веро", color: "hsl(var(--market-vero))" },
   bigshop: { name: "BigShop", color: "hsl(var(--market-bigshop))" },
   stokomak: { name: "Стокомак", color: "hsl(var(--market-stokomak))" },
+  dim: { name: "ДИМ Маркет", color: "hsl(var(--market-dim))" },
+  zur: { name: "Зур", color: "hsl(var(--market-zur))" },
+  elida: { name: "Елида", color: "hsl(var(--market-elida))" },
+  spar: { name: "SPAR", color: "hsl(var(--market-spar))" },
+  kipper: { name: "Киппер", color: "hsl(var(--market-kipper))" },
 };

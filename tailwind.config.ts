@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
   darkMode: ["class"],
@@ -69,6 +70,11 @@ export default {
           vero: "hsl(var(--market-vero))",
           bigshop: "hsl(var(--market-bigshop))",
           stokomak: "hsl(var(--market-stokomak))",
+          dim: "hsl(var(--market-dim))",
+          zur: "hsl(var(--market-zur))",
+          elida: "hsl(var(--market-elida))",
+          spar: "hsl(var(--market-spar))",
+          kipper: "hsl(var(--market-kipper))",
         },
       },
       borderRadius: {
@@ -97,5 +103,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [tailwindcssAnimate],
 } satisfies Config;
