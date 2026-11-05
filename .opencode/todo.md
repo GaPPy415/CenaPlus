@@ -43,7 +43,7 @@
 - [x] S1b.2.4: `backend/tests/test_rate_limiter.py` + `test_categorize_failures.py` (12 cases) pass; 57 backend tests pass
 - [x] S1b.2.5: Live check: `categorize_products.py --limit 3` stored 3/3 high-confidence rows; `extract_features.py` resumed the same window (3 requests)
 
-## M2: Deterministic grouping (replaces semantic grouping) | status: in_progress
+## M2: Deterministic grouping (replaces semantic grouping) | status: completed
 - [x] S2.0: Measured on real data — Tier A: 103,789 keys (14,811 multi, 41,281 rows, avg 2.79); Tier B (sorted tokens) merges another 2,677 keys → 101,112 keys, 15,821 multi, 44,968 rows (avg 2.84)
 - [x] S2.0b: **id type decided — keep UUID.** bigint would save only ~2 MB of a 1.1 GB database and no measurable lookup time, and would churn the frontend `group_id: string` type. Natural-key unique index does the real work either way
 - [x] S2.1: Key columns implemented — `init/05_grouping_keys.sql` applied (`product_name_key`, `product_name_sorted`, `variant_key`, `grouping_keys_version` + `idx_products_group_key`; `groups` gained the matching natural-key columns; `uq_groups_identity` deferred until the cutover empties `groups`). Rules live in `backend/data/grouping_rules.py` (shared with the collision study); `backend/data/grouping_keys.py` derived all 130,259 rows in ~6.5 s (~20k rows/s)
@@ -59,7 +59,7 @@
 - [x] S2.2: Backfill implemented in `backend/data/group_products.py` (`--dry-run` / `--apply`) and **applied**: groups truncated and rebuilt
 - [x] S2.2a: Rows without features (34,957 incl. 12 new-scraper rows) got singleton groups per (market, raw name) — 0 products left ungrouped
 - [x] S2.6: Group category = majority `(main_category, sub_category)` tuple among members, **written back onto every member** (tie ⇒ tuple of the member with the smallest `id`). Applied; verified 0 groups with mixed categories
-- [ ] S2.3: Same-market policy (decided from the collision study; implement exactly this):
+- [x] S2.3: Same-market policy (decided from the collision study; implemented in `grouping_rules.classify()`):
   - **variant families** — differing values ⇒ *different products, never merge*: `dimensions`/`dimension`/`size`, `packaging`/`pack`/`pakuvanje`/`packing`/`paket`, `code`/`model`/`sku`/`barcode`, `accessory`, and form words in the name (`парче`/`парчиња`/`цело`/`рефус`/`пакет`)
   - `pack_count` is a **variant signal only** (differing 18/1 vs 42/1 ⇒ separate) — deliberately *not* part of the global identity key
   - **promo is not identity**: ignore the `promo` metadata key, strip fixed promo words (`гратис`/`промо`/`акција`/`подарок`) and `N+M` patterns, **and strip the tokens recorded in that row's `promo` value** (e.g. `со 2 чаши`)
@@ -71,7 +71,6 @@
   - **exception:** `market='vero'` + `краток рок` anywhere in the bucket ⇒ always same group (1,044 rows; UI badge later)
   - every row still gets a `group_id`; display relies on the existing `WHERE in_stock = true` so the available row wins
   - measured result of these rules: 4,086 buckets are real variants (separate), 1,297 buckets merge across the 5 merge classes, **110 buckets / 222 rows remain for review** (`.opencode/collisions-leftover.csv`, generated locally, not committed)
-- [ ] S2.3c: Decide what to do with descriptive metadata keys (`category`, `brand_line`, `type`): every non-promo key now counts as identity, so model inconsistency (one row records a leftover, the other doesn't) splits identical products — consider pruning description-only keys at extraction
 - [x] S2.3a: Metadata canonicalisation before comparison — implemented in `backend/data/same_market_collisions.py` (`canonical_variant`, key aliases, value normalisation); the grouper will import that module rather than duplicate the rules
 - [x] S2.3b: Collision study done — 5,493 same-market buckets / 16,105 rows classified: 4,086 variant (separate), 1,297 merge across 5 classes, **110 buckets / 222 rows residual** for review (`.opencode/collisions-leftover.csv`, generated locally, not committed)
 - [x] S2.4: Tier C near-duplicate report done (`backend/data/tier_c_report.py`, `variant_impact.py`, `grouping_projection.py`); fuzzy merges are guarded rather than threshold-based
@@ -79,13 +78,12 @@
 - [x] S2.7: Cutover done — `TRUNCATE groups`, `group_id` nulled, rebuilt, no `legacy_group_id` captured. Result: **147,038 groups / 12,476 multi-product / 30,653 rows in multi (23.5% of featured) / avg 1.12 / largest group 13 / max 10 markets / 0 ungrouped / 0 empty / 0 mixed-category groups**
 - [x] S2.8: Fixed a transitivity bug found in production data — variant compatibility is not transitive, so union-find chained incompatible rows (a 66-row group mixed different dimensions). Replaced with fuzzy name merging + **greedy variant clustering**; largest group dropped 66 → 13
 - [x] S2.9: Manufacturer merges applied — `backend/data/manufacturer_merges.py` (propose / `--csv` / `--apply`, plus manual `--pair`). 975 candidate pairs at ≥0.86; auto-applied the ≥0.95 band (81 pairs → 72 merged, 9 skipped because a chain had already absorbed the drop name), then the manual Bimilk family (`бимилк` ← `битолско`, `битолски`, `битолска`, `бимилк моја кравица`; left `битолска квасара`/`битолска млекара` alone as different companies). **8,509 → 8,433 manufacturers**, regrouped after each pass. Evidence it works: `бимилк` milk groups now span 7 markets (`млеко битолско 2.8% 1кг`), 6 markets (`Bimilk - млеко 250ml`), etc. Remaining 894 pairs at 0.86–0.95 sit in `.opencode/manufacturer-merges.csv` (generated locally, not committed; the applied manual pairs are in `.opencode/manual-merges.csv`)
-- [ ] S2.10: Coverage lever left: extraction name-consistency (`чоколадо алпен милк` / `алпин` / `алпине милк` are four different keys). Grouping is correct; the names are not consistent across shops
-- [x] S2.6: Manufacturer near-duplicate review tool (merge битолско/бимилк into one alias) — done: `manufacturer_aliases` holds `битолско`/`битолски`/`битолска`/`бимилк моја кравица` → `бимилк`, and `/manufacturer` resolves aliases
-- [ ] S2.7: Embeddings stay as fallback (decision) — do not drop `name_embedding` / `embed_products.py`
+- [x] S2.12: Manufacturer near-duplicate review tool (merge битолско/бимилк into one alias) — done: `manufacturer_aliases` holds `битолско`/`битолски`/`битолска`/`бимилк моја кравица` → `бимилк`, and `/manufacturer` resolves aliases
+- [x] S2.11: Embeddings stay as fallback (decision) — kept: `name_embedding` / `embed_products.py` remain, used only by `/search/semantic`
 
-## M3: Serve + display grouped products | status: pending
-- [ ] S3.1: API adaptation (group fields, search over new key)
-- [ ] S3.2: Frontend display of extracted fields
+## M3: Serve + display grouped products | status: completed
+- [x] S3.1: API adaptation — `grouped_products` still drives listings; `/search` is pg_trgm over `groups.product_name` + `manufacturers.canonical_name`; `/product` exposes extracted fields (manufacturer + display name, quantity, `kratok_rok`); `/manufacturer` lists a brand across categories
+- [x] S3.2: Frontend display of extracted fields — detail page shows manufacturer/size/`краток рок`; cards show canonical group name + main-category chip on manufacturer listings; all fetched via `src/lib/api.ts`
 
 ## M4: Product detail page (new feature) | status: completed
 - [x] S4.1: `GET /product?g_id=<uuid>` — group metadata (manufacturer, size, fluid, `kratok_rok`), price stats (cheapest/priciest/savings, market counts) and **every** offer including out-of-stock, ordered in-stock first then by price. UUID validated (400 on malformed), 404 when the group is gone
@@ -103,7 +101,9 @@
 - [x] S5.6: Verified `bunx tsc -b`, `bun run lint` (0 errors), `bun run test` (5 pass), `bun run build`; endpoint checked live (`бимилк` 144 groups/3 categories/12 markets, `Битолско` → `Бимилк`, unknown → 404); Playwright: chip click → manufacturer page, 21 Medela groups, 3 category chips, page 2 = 9 cards, per_page=24 = 21 cards, 0 console errors
 
 ## Backlog / flagged
-- [ ] Re-categorize the 46,135 poisoned rows (`main_category='Разно' AND sub_category='Канцелариски материјал' AND confidence=0`). They are already in the pending queue (confidence < 0.5), but at the free tier's 15 RPM a full pass needs ~4.7k requests ≈ 5 h — use a paid key or chunk with `--limit`.
+- [x] Re-categorize the poisoned rows: verified on 2026-11-05 that the live DB has **0** rows with `confidence IS NULL` or `< 0.5` — the backlog is empty (a future extraction pass can still leave failed rows, which stay unsaved and retry).
 - [x] `backend/api.py` idle-in-transaction: fixed with `conn.autocommit = True` at import, so read endpoints commit each statement and never hold `ACCESS SHARE`.
-- [ ] Pre-existing mobile overflow: at 390px the global `Header` action group (search + theme + cart, `ml-auto flex items-center gap-2`) is ~65px wider than the viewport, so every page scrolls horizontally (`scrollWidth` 455 vs 390). Reproduces on `/`, not specific to the manufacturer view.
-- [ ] The running `cenaplus-frontend-1` container serves the old build until it is rebuilt (`docker compose build frontend`), so the manufacturer route is only visible through the dev server.
+- [x] Mobile overflow fixed (2026-11-05): `Header` hides the wordmark below `sm`, hides breadcrumbs below `md`, and lets the search form flex (`w-full sm:w-48 lg:w-64`). Verified with Playwright at 320/360/390/414/640/768/1024/1280 on `/`, a subcategory listing, `/product`, `/manufacturer` and `/search`: `scrollWidth == clientWidth` everywhere, 0 console errors; mobile search still navigates to `/search?q=…`.
+- [x] Frontend container rebuilt by the user, so the deployed image now includes `/product` and `/manufacturer`.
+- [ ] S2.3c follow-up: decide what to do with descriptive metadata keys (`category`, `brand_line`, `type`) — every non-promo key counts as identity, so extraction inconsistency can split identical products; consider pruning description-only keys at extraction.
+- [ ] S2.10 follow-up: extraction name-consistency across shops (`чоколадо алпен милк` / `алпин` / `алпине милк` are four different keys). Grouping is correct; the names are not consistent.
