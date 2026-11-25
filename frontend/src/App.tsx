@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { CartProvider } from "@/context/CartContext";
 import Header from "@/components/Header";
+import Footer from "@/components/Footer";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import SearchResults from "./pages/SearchResults";
@@ -22,14 +23,19 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <Header />
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/search" element={<SearchResults />} />
-            <Route path="/product" element={<ProductDetail />} />
-            <Route path="/manufacturer" element={<ManufacturerView />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <div className="min-h-screen flex flex-col">
+            <Header />
+            <div className="flex-1">
+              <Routes>
+                <Route path="/" element={<Index />} />
+                <Route path="/search" element={<SearchResults />} />
+                <Route path="/product" element={<ProductDetail />} />
+                <Route path="/manufacturer" element={<ManufacturerView />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </div>
+            <Footer />
+          </div>
         </BrowserRouter>
       </TooltipProvider>
     </CartProvider>
