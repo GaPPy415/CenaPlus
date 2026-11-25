@@ -109,7 +109,7 @@ class PipelinePartialScraperTests(unittest.TestCase):
             return type("Res", (), {"returncode": rc})()
 
         with patch.object(run_pipeline.subprocess, "run", side_effect=fake_run):
-            rc = run_pipeline.main()
+            rc = run_pipeline.main([])
 
         self.assertEqual(rc, 0)
         self.assertEqual(
@@ -126,10 +126,99 @@ class PipelinePartialScraperTests(unittest.TestCase):
             return type("Res", (), {"returncode": 1})()
 
         with patch.object(run_pipeline.subprocess, "run", side_effect=fake_run):
-            rc = run_pipeline.main()
+            rc = run_pipeline.main([])
 
         self.assertEqual(rc, 1)
         self.assertEqual(called, ["run_scrapers.py"])
+
+
+class ScraperFreshnessSkipTests(unittest.TestCase):
+    def test_skips_fetch_when_source_marker_matches_stored_state(self):
+        from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
+
+        fetch_called = False
+
+        class FakeFreshScraper(MarketScraper):
+            market = "__test_fresh_market__"
+
+            def get_source_marker(self):
+                return "2026-11-25 10:00:00"
+
+            def fetch(self):
+                nonlocal fetch_called
+                fetch_called = True
+                return [ScrapedProduct(name="Test", price=50)]
+
+        fake_conn = type("Conn", (), {"closed": False, "close": lambda self: None})()
+        with (
+            patch("backend.data.scrapers.scraper_base.connect_to_db", return_value=fake_conn),
+            patch(
+                "backend.data.scrapers.scraper_base.get_scraper_state",
+                return_value={"last_source_marker": "2026-11-25 10:00:00"},
+            ),
+        ):
+            rc = FakeFreshScraper().run()
+
+        self.assertEqual(rc, 0)
+        self.assertFalse(fetch_called)
+
+    def test_force_bypasses_matching_source_marker(self):
+        from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
+
+        fetch_called = False
+
+        class FakeForceScraper(MarketScraper):
+            market = "__test_force_market__"
+
+            def get_source_marker(self):
+                return "2026-11-25 10:00:00"
+
+            def fetch(self):
+                nonlocal fetch_called
+                fetch_called = True
+                return [ScrapedProduct(name="Test", price=50)]
+
+        fake_conn = type("Conn", (), {"closed": False, "close": lambda self: None})()
+        with (
+            patch("backend.data.scrapers.scraper_base.connect_to_db", return_value=fake_conn),
+            patch("backend.data.scrapers.scraper_base.get_products_by_market", return_value={}),
+            patch("backend.data.scrapers.scraper_base.save_products_to_products_table") as mock_save,
+            patch("backend.data.scrapers.scraper_base.upsert_scraper_state") as mock_state,
+        ):
+            rc = FakeForceScraper().run(force=True)
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(fetch_called)
+        mock_save.assert_called_once()
+        mock_state.assert_called_once()
+
+    def test_fails_open_when_source_marker_raises(self):
+        from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
+
+        fetch_called = False
+
+        class FakeBrokenMarkerScraper(MarketScraper):
+            market = "__test_broken_marker__"
+
+            def get_source_marker(self):
+                raise RuntimeError("network hiccup")
+
+            def fetch(self):
+                nonlocal fetch_called
+                fetch_called = True
+                return [ScrapedProduct(name="Test", price=50)]
+
+        fake_conn = type("Conn", (), {"closed": False, "close": lambda self: None})()
+        with (
+            patch("backend.data.scrapers.scraper_base.connect_to_db", return_value=fake_conn),
+            patch("backend.data.scrapers.scraper_base.get_products_by_market", return_value={}),
+            patch("backend.data.scrapers.scraper_base.save_products_to_products_table"),
+            patch("backend.data.scrapers.scraper_base.upsert_scraper_state"),
+        ):
+            rc = FakeBrokenMarkerScraper().run()
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(fetch_called)
 
 
 if __name__ == "__main__":

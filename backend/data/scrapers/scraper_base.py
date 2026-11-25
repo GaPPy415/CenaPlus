@@ -32,6 +32,7 @@ standalone script, so keep the ``__main__`` block.
 from __future__ import annotations
 
 import html
+import os
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -42,7 +43,9 @@ from typing import Iterable
 from backend.data.db_utils import (
     connect_to_db,
     get_products_by_market,
+    get_scraper_state,
     save_products_to_products_table,
+    upsert_scraper_state,
 )
 
 
@@ -159,11 +162,48 @@ class MarketScraper(ABC):
             )
         return rows
 
-    def run(self) -> int:
+    def get_source_marker(self) -> str | None:
+        """Optional lightweight freshness fingerprint (e.g. site 'last updated' timestamp).
+
+        Override in subclasses whose site exposes a reliable update timestamp.
+        Return ``None`` to always scrape normally.
+        """
+        return None
+
+    def _safe_get_source_marker(self) -> str | None:
+        try:
+            marker = self.get_source_marker()
+            return marker.strip() if isinstance(marker, str) and marker.strip() else None
+        except Exception as exc:
+            print(f"[{self.market}] freshness check failed ({exc}); scraping normally")
+            return None
+
+    def run(self, *, force: bool = False) -> int:
         """Execute the market's strategy and persist the result. 0 = success."""
         if not self.market:
             raise ValueError(f"{type(self).__name__}.market is not set")
         start = time.time()
+        force = force or os.getenv("CENAPLUS_FORCE_SCRAPE") == "1"
+
+        source_marker = self._safe_get_source_marker()
+        if source_marker and not force:
+            check_conn = connect_to_db()
+            try:
+                state = get_scraper_state(check_conn, self.market)
+            finally:
+                if not check_conn.closed:
+                    check_conn.close()
+            if state and state.get("last_source_marker") == source_marker:
+                print(
+                    f"[{self.market}] unchanged (source marker: {source_marker}); "
+                    f"skipping scrape"
+                )
+                return 0
+            print(
+                f"[{self.market}] update detected "
+                f"(source marker: {source_marker}, previous: {state.get('last_source_marker') if state else None})"
+            )
+
         print(f"[{self.market}] scraping")
         products = self.collect()
 
@@ -182,8 +222,9 @@ class MarketScraper(ABC):
             now = datetime.now()
             rows = self.build_rows(products, existing_ids, now)
             save_products_to_products_table(
-                conn, self.market, rows, {p.name for p in products}
+                conn, self.market, rows, {p.name for p in products}, close=False
             )
+            upsert_scraper_state(conn, self.market, source_marker, len(products), now)
         finally:
             if not conn.closed:
                 conn.close()

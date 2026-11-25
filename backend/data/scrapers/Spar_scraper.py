@@ -140,6 +140,15 @@ class SparScraper(MarketScraper):
     #: to be categorized and embedded). Flip to False to store the full list.
     only_available: bool = True
 
+    def get_source_marker(self) -> str | None:
+        markets = get_skopje_markets()
+        if not markets:
+            return None
+        updated = [str(m["updated_at"]).strip() for m in markets if m.get("updated_at")]
+        if not updated:
+            return None
+        return f"{max(updated)}|stores={len(markets)}"
+
     def fetch_market(self, market: dict) -> list[ScrapedProduct]:
         market_id = market["id"]
         print(f"[{MARKET_NAME}] store {market_id} ({market.get('name')})")

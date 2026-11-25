@@ -188,10 +188,62 @@ def refresh_read_views(
     return refreshed
 
 
-def save_products_to_products_table(conn: psycopg2.extensions.connection, market: str, products_to_upsert: list, all_product_names: set):
+def get_scraper_state(conn: psycopg2.extensions.connection, market: str) -> dict | None:
+    """Return ``{"last_source_marker", "last_scraped_at", "products_count"}`` for a market, or None."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT to_regclass('public.scraper_state') AS tbl")
+        if cur.fetchone()["tbl"] is None:
+            return None
+        cur.execute(
+            """
+            SELECT last_source_marker, last_scraped_at, products_count
+            FROM public.scraper_state
+            WHERE market = %s
+            """,
+            (market,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def upsert_scraper_state(
+    conn: psycopg2.extensions.connection,
+    market: str,
+    source_marker: str | None,
+    products_count: int,
+    scraped_at: datetime | None = None,
+) -> None:
+    """Record a completed market scrape and its source freshness marker."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('public.scraper_state')")
+        if cur.fetchone()[0] is None:
+            return
+        cur.execute(
+            """
+            INSERT INTO public.scraper_state (market, last_source_marker, last_scraped_at, products_count)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (market) DO UPDATE SET
+                last_source_marker = EXCLUDED.last_source_marker,
+                last_scraped_at    = EXCLUDED.last_scraped_at,
+                products_count     = EXCLUDED.products_count
+            """,
+            (market, source_marker, scraped_at or datetime.now(), products_count),
+        )
+    if not conn.autocommit:
+        conn.commit()
+
+
+def save_products_to_products_table(
+    conn: psycopg2.extensions.connection,
+    market: str,
+    products_to_upsert: list,
+    all_product_names: set,
+    *,
+    close: bool = True,
+):
     """Upsert a market's products, then mark the leftovers out of stock.
 
-    Closes ``conn`` when done (scrapers run one market per process).
+    Closes ``conn`` when ``close=True`` (scrapers run one market per process).
     """
     save_start = time.time()
 
@@ -209,7 +261,8 @@ def save_products_to_products_table(conn: psycopg2.extensions.connection, market
     print(f"Marked {marked} products out of stock in {round(time.time() - mark_start, 2)}s")
     if os.getenv("CENAPLUS_SKIP_VIEW_REFRESH") != "1":
         refresh_read_views(conn)
-    conn.close()
+    if close:
+        conn.close()
 
 
 def get_products_by_market(conn: psycopg2.extensions.connection, market: str) -> dict:

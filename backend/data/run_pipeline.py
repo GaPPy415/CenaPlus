@@ -1,5 +1,6 @@
 """Run the full data pipeline: scrape → categorize → extract features → group."""
 from __future__ import annotations
+import argparse
 import os
 import subprocess
 import sys
@@ -19,7 +20,15 @@ SCRIPTS = [
     "group_products.py",
 ]
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the full CenaPlus data pipeline.")
+    parser.add_argument(
+        "--force-scrape",
+        action="store_true",
+        help="Ignore per-market source freshness markers and scrape every market",
+    )
+    args = parser.parse_args(argv)
+
     data_dir = Path(__file__).parent.resolve()
     failed = []
     warnings = []
@@ -45,6 +54,8 @@ def main() -> int:
             if num_scrapers > 0:
                 cmd += ["--parallel", str(num_scrapers)]
             cmd += ["--no-refresh"]
+            if args.force_scrape:
+                cmd += ["--force"]
         if script == "group_products.py":
             cmd += ["--apply"]
 

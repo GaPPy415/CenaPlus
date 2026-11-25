@@ -6,12 +6,15 @@ parallel, and each category walks its pages in small parallel batches (the
 tail of a batch may hit 404s, which simply end the category).
 """
 
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
 
 from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
+
+_UPDATED_RE = re.compile(r"Последно ажурирање:\s*([0-9./-]+\s+[0-9:]+)")
 
 BASE_URL = 'https://pricelist.vero.com.mk/'
 SESSION = requests.Session()
@@ -97,6 +100,28 @@ def scrape_shop(shop_link: str) -> list[ScrapedProduct]:
 
 class VeroScraper(MarketScraper):
     market = MARKET_NAME
+
+    def get_source_marker(self) -> str | None:
+        index_page = SESSION.get(BASE_URL + "index.html", timeout=30)
+        index_page.raise_for_status()
+        soup = BeautifulSoup(index_page.content, "html.parser")
+        first_href = next(
+            (
+                a["href"]
+                for a in soup.find_all("a", href=True)
+                if a["href"].endswith(".html") and a["href"] != "index.html"
+            ),
+            None,
+        )
+        if not first_href:
+            return None
+        page = SESSION.get(BASE_URL + first_href, timeout=30)
+        page.raise_for_status()
+        text = BeautifulSoup(page.content, "html.parser").get_text(" ", strip=True)
+        match = _UPDATED_RE.search(text)
+        if match:
+            return match.group(1).strip()
+        return page.headers.get("Last-Modified")
 
     def fetch(self) -> list[ScrapedProduct]:
         index_page = SESSION.get(BASE_URL + "index.html")

@@ -22,7 +22,7 @@ def find_scraper_scripts(scraper_dir: Path) -> List[Path]:
     return scripts
 
 
-def run_script(script_path: Path, logs_dir: Path, stream: bool = True) -> Dict[str, Any]:
+def run_script(script_path: Path, logs_dir: Path, stream: bool = True, force: bool = False) -> Dict[str, Any]:
     start = time.perf_counter()
     log_path = logs_dir / f"{script_path.stem}-{timestamp()}.log"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -55,6 +55,8 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True) -> Dict[s
         # Refresh materialized views once after all scrapers finish so parallel
         # workers do not contend on REFRESH MATERIALIZED VIEW locks.
         env["CENAPLUS_SKIP_VIEW_REFRESH"] = "1"
+        if force:
+            env["CENAPLUS_FORCE_SCRAPE"] = "1"
 
         try:
             proc = subprocess.Popen(
@@ -91,14 +93,14 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True) -> Dict[s
     return result
 
 
-def run_parallel(scripts: List[Path], logs_dir: Path, max_workers: int) -> List[Dict[str, Any]]:
+def run_parallel(scripts: List[Path], logs_dir: Path, max_workers: int, force: bool = False) -> List[Dict[str, Any]]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     results: List[Dict[str, Any]] = []
     print(f"Running {len(scripts)} scripts in parallel with {max_workers} workers...")
 
     def _runner(p: Path) -> Dict[str, Any]:
-        return run_script(p, logs_dir, stream=False)
+        return run_script(p, logs_dir, stream=False, force=force)
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         fut_to_script = {ex.submit(_runner, p): p for p in scripts}
@@ -130,6 +132,7 @@ def main() -> int:
     parser.add_argument("--parallel", type=int, default=0, help="Run in parallel with N workers (0 = sequential)")
     parser.add_argument("--dry-run", action="store_true", help="List scripts without executing")
     parser.add_argument("--no-refresh", action="store_true", help="Skip refreshing API materialized views after scraping")
+    parser.add_argument("--force", action="store_true", help="Ignore source freshness markers and scrape every market")
     args = parser.parse_args()
 
     scraper_dir = Path(args.scrapers_dir).resolve()
@@ -155,11 +158,11 @@ def main() -> int:
     summary: List[Dict[str, Any]] = []
 
     if args.parallel and args.parallel > 1:
-        summary = run_parallel(scripts, logs_dir, max_workers=args.parallel)
+        summary = run_parallel(scripts, logs_dir, max_workers=args.parallel, force=args.force)
     else:
         print("Running sequentially...")
         for p in scripts:
-            res = run_script(p, logs_dir, stream=True)
+            res = run_script(p, logs_dir, stream=True, force=args.force)
             summary.append(res)
             print(f"--> {p.name}: {res['status']} in {res['duration_seconds']}s (log: {res['log_file']})")
 

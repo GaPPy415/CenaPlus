@@ -238,6 +238,16 @@ CREATE TABLE IF NOT EXISTS public.bge_text_embeddings (
 -- from ON CONFLICT.
 
 -- ---------------------------------------------------------------------------
+-- Per-market scraper freshness state (skip unchanged sites politely)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.scraper_state (
+    market             text PRIMARY KEY,
+    last_source_marker text,
+    last_scraped_at    timestamp NOT NULL DEFAULT now(),
+    products_count     integer
+);
+
+-- ---------------------------------------------------------------------------
 -- API-facing materialized read models (refreshed CONCURRENTLY by pipeline/scrapers)
 -- ---------------------------------------------------------------------------
 CREATE MATERIALIZED VIEW IF NOT EXISTS public.grouped_products AS

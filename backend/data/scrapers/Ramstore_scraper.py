@@ -1,11 +1,18 @@
 """Рамстор — per-store HTML price tables (ramstore.com.mk) parsed with pandas."""
 
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
+import requests
 from tqdm import tqdm
 
 from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
+
+_UPDATED_RE = re.compile(
+    r"Датум и време на последно ажурирање на цените:\s*([0-9./-]+\s+[0-9:]+\s*(?:AM|PM)?)",
+    re.IGNORECASE,
+)
 
 MARKET_NAME = 'ramstore'
 
@@ -102,6 +109,30 @@ def scrape_store(store: str) -> list[ScrapedProduct]:
 
 class RamstoreScraper(MarketScraper):
     market = MARKET_NAME
+
+    def get_source_marker(self) -> str | None:
+        if not stores:
+            return None
+        # Stream only the header portion of one ~7 MB store page to read the timestamp kindly.
+        with requests.get(
+            stores[0],
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=30,
+            stream=True,
+        ) as response:
+            response.raise_for_status()
+            buf = bytearray()
+            for chunk in response.iter_content(chunk_size=16384):
+                if not chunk:
+                    continue
+                buf.extend(chunk)
+                text = buf.decode("utf-8", errors="ignore")
+                match = _UPDATED_RE.search(text)
+                if match:
+                    return " ".join(match.group(1).split())
+                if len(buf) >= 262144:
+                    break
+        return None
 
     def fetch(self) -> list[ScrapedProduct]:
         products: list[ScrapedProduct] = []

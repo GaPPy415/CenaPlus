@@ -42,6 +42,9 @@ SESSION.headers.update(
 #: Prices arrive as "139.00" (denars, two decimals). Malformed cells such as
 #: ".01" must not become price 0.
 _PRICE_RE = re.compile(r"^(\d+)(?:\.(\d+))?$")
+_UPDATED_RE = re.compile(
+    r"Датум и време на последното ажурирање:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})"
+)
 
 
 def parse_price(text: str) -> int | None:
@@ -90,6 +93,15 @@ class ZurPlatformScraper(MarketScraper):
     index_url: str = ""
     #: `action` value of the AJAX endpoint, e.g. "load_prices_data".
     ajax_action: str = ""
+
+    def get_source_marker(self) -> str | None:
+        if not self.index_url:
+            return None
+        response = SESSION.get(self.index_url, timeout=30)
+        response.raise_for_status()
+        text = BeautifulSoup(response.content, "html.parser").get_text(" ", strip=True)
+        match = _UPDATED_RE.search(text)
+        return match.group(1).strip() if match else None
 
     def fetch_org(self, org: str) -> list[ScrapedProduct]:
         """All products of one store."""

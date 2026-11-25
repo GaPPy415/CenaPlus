@@ -25,8 +25,13 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+from bs4 import BeautifulSoup
 
 from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
+
+_UPDATED_RE = re.compile(
+    r"Датум и време на последно ажурирање на цените:\s*([^\n<]{6,40}?)(?:\s+Име на артикал|$)"
+)
 
 MARKET_NAME = "kipper"
 
@@ -144,6 +149,22 @@ def fetch_store(store: dict) -> list[ScrapedProduct]:
 
 class KipperScraper(MarketScraper):
     market = MARKET_NAME
+
+    def get_source_marker(self) -> str | None:
+        response = SESSION.get(
+            POSTS_URL,
+            params={"categories": CITY_TERM, "per_page": 1, "page": 1, "_fields": "id,link"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        stores = response.json()
+        if not isinstance(stores, list) or not stores or not stores[0].get("link"):
+            return None
+        page = SESSION.get(stores[0]["link"], timeout=30)
+        page.raise_for_status()
+        text = BeautifulSoup(page.content, "html.parser").get_text(" ", strip=True)
+        match = _UPDATED_RE.search(text)
+        return " ".join(match.group(1).split()) if match else None
 
     def fetch(self) -> list[ScrapedProduct]:
         stores = get_skopje_stores()

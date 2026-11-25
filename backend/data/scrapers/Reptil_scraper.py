@@ -13,6 +13,7 @@ MAX_WORKERS = 6  # Max connection pool size is 10, be nice to the server and the
 MARKET_NAME = 'reptil'
 PER_PAGE = 100
 BASE_URL = 'https://marketonline.mk/wp-json/wc/store/v1/products'
+WP_PRODUCT_URL = 'https://marketonline.mk/wp-json/wp/v2/product'
 
 
 def parse_price(price_str: str, minor_unit: int) -> int:
@@ -71,6 +72,20 @@ class ReptilScraper(MarketScraper):
     market = MARKET_NAME
     # Last category entry wins, as in the original scraper.
     keep_in_stock_on_duplicate = False
+
+    def get_source_marker(self) -> str | None:
+        response = requests.get(
+            WP_PRODUCT_URL,
+            params={"per_page": 1, "orderby": "modified", "order": "desc"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        items = response.json()
+        if not isinstance(items, list) or not items:
+            return None
+        modified = items[0].get("modified_gmt") or items[0].get("modified")
+        total = response.headers.get("X-WP-Total", "")
+        return f"{modified}|total={total}" if modified else None
 
     def fetch(self) -> list[ScrapedProduct]:
         url = f"{BASE_URL}?per_page={PER_PAGE}&page=1"
