@@ -88,7 +88,7 @@ while the DB session runs `Etc/UTC` — do not author them with SQL `now()`.
 | Scraper | Market | Method |
 |---------|--------|--------|
 | `Reptil_scraper.py` | Reptil | WooCommerce Store API, `marketonline.mk` (paginated, concurrent) |
-| `Bigshop_scraper.py` | BigShop | WooCommerce Store API, `bigshop.mk` (paginated, concurrent) |
+| `Bigshop_scraper_maintenance.py` | BigShop | WooCommerce Store API, `bigshop.mk` (paginated, concurrent) |
 | `Zito_scraper.py` | Жито Маркет | proverkanaceni.mk platform, `zito.proverkanaceni.mk`, 94 stores |
 | `Kam_scraper.py` | КАМ | PDF price lists per store, `kam.com.mk` (uses `kam_pdf_utils.py`) |
 | `Ramstore_scraper.py` | Рамстор | HTML per-store pages, 15 stores (`ramstore.com.mk`) + pandas, 3 stores in parallel |
