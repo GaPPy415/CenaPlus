@@ -1,13 +1,7 @@
-"""Shared text/embedding helpers.
-
-Kept deliberately light: `normalize_string` is imported by the API for query
-normalisation, so the heavy embedding client is created lazily inside
-`get_embeddings_client()` and only when the semantic fallback is actually used.
-"""
+"""Shared text normalization helpers used by the API and data pipeline."""
 
 import re
 
-import numpy as np
 from cyrtranslit import to_cyrillic
 
 _DECIMAL_RE = re.compile(r"(\d)\s*[.,]\s*(\d)")
@@ -49,30 +43,3 @@ def normalize_string(value: str | None) -> str | None:
     text = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", text)
     text = re.sub(r"\s+", " ", text).strip(" .")
     return text or None
-
-
-def normalize_name(name: str) -> str:
-    """Sorted-token Cyrillic form used to build and query embeddings.
-
-    Must stay byte-identical to the form the stored embeddings were built with,
-    so it deliberately does not use `normalize_string`.
-    """
-    return " ".join(sorted(to_cyrillic(name.lower(), "mk").split(" ")))
-
-
-def get_embeddings_client():
-    """Gemini embedding client (imported lazily so the API boots without it)."""
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
-
-    return GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        task_type="semantic_similarity",
-        output_dimensionality=768,
-    )
-
-
-def normalize_embedding(embedding: np.ndarray) -> np.ndarray:
-    n = np.linalg.norm(embedding)
-    if n == 0:
-        return embedding
-    return embedding / n

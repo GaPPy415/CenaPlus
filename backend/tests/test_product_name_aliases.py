@@ -1,6 +1,6 @@
 import unittest
 
-from backend.data.product_name_aliases import propose_tokens, token_pair_ok
+from backend.data.tools.product_name_aliases import propose_tokens, token_pair_ok
 
 
 class TokenPairGuardTests(unittest.TestCase):

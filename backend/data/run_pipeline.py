@@ -1,4 +1,4 @@
-"""Run the full data pipeline: scrape → categorize → embed → group."""
+"""Run the full data pipeline: scrape → categorize → extract features → group."""
 from __future__ import annotations
 import os
 import subprocess
@@ -6,15 +6,16 @@ import sys
 import time
 from pathlib import Path
 
-from run_scrapers import find_scraper_scripts
-
 PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from backend.data.run_scrapers import find_scraper_scripts
 
 SCRIPTS = [
     "run_scrapers.py",
     "categorize_products.py",
     "extract_features.py",
-    "embed_products.py",
     "group_products.py",
 ]
 

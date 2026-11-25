@@ -1,20 +1,13 @@
 from enum import Enum
 import uuid as uuid_lib
 
-import numpy as np
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2.extras import RealDictCursor
 
 from backend.data.constants import CATEGORIES
 from backend.data.db_utils import connect_to_db
-from backend.data.text_utils import (
-    get_embeddings_client,
-    normalize_embedding,
-    normalize_name,
-    normalize_string,
-    strip_quantity_tokens,
-)
+from backend.data.text_utils import normalize_string, strip_quantity_tokens
 
 app = FastAPI()
 conn = connect_to_db()
@@ -26,17 +19,6 @@ conn.autocommit = True
 # similarity clears this floor. Brands live outside product_name, so the query
 # matches manufacturer names too.
 SEARCH_SIMILARITY_THRESHOLD = 0.8
-
-# Created lazily: the trigram search needs no API key, so the service must boot
-# (and serve /search) without GOOGLE_API_KEY.
-_embeddings_client = None
-
-
-def embeddings_client():
-    global _embeddings_client
-    if _embeddings_client is None:
-        _embeddings_client = get_embeddings_client()
-    return _embeddings_client
 
 
 app.add_middleware(
@@ -110,27 +92,6 @@ def search_products(q: str = Query(..., min_length=1)):
     needle = strip_quantity_tokens(normalize_string(q)) or (normalize_string(q) or q.strip().lower())
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(SEARCH_SQL, {"q": needle, "threshold": SEARCH_SIMILARITY_THRESHOLD})
-        rows = cur.fetchall()
-    return {"data": rows}
-
-
-@app.get("/search/semantic")
-def search_products_semantic(q: str = Query(..., min_length=1)):
-    """Embedding fallback, kept for comparison (needs GOOGLE_API_KEY)."""
-    normalized = normalize_name(q)
-    vector = normalize_embedding(np.array(embeddings_client().embed_query(normalized))).tolist()
-
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT group_id, group_name, main_category, sub_category, products,
-                   1 - (name_embedding <=> %s::vector) AS similarity
-            FROM grouped_products
-            WHERE 1 - (name_embedding <=> %s::vector) >= 0.80
-            ORDER BY similarity DESC
-            """,
-            (vector, vector),
-        )
         rows = cur.fetchall()
     return {"data": rows}
 
