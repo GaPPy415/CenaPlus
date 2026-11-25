@@ -40,8 +40,10 @@ def main() -> int:
         env["PYTHONPATH"] = PROJECT_ROOT
 
         cmd = [sys.executable, str(path)]
-        if script == "run_scrapers.py" and num_scrapers > 0:
-            cmd += ["--parallel", str(num_scrapers)]
+        if script == "run_scrapers.py":
+            if num_scrapers > 0:
+                cmd += ["--parallel", str(num_scrapers)]
+            cmd += ["--no-refresh"]
         if script == "group_products.py":
             cmd += ["--apply"]
 

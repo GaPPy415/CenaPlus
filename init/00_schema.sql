@@ -171,6 +171,16 @@ CREATE INDEX IF NOT EXISTS idx_products_name
 CREATE INDEX IF NOT EXISTS idx_groups_category
     ON public.groups USING btree (main_category, sub_category);
 
+-- /search manufacturer branch & materialized view refresh
+CREATE INDEX IF NOT EXISTS idx_groups_manufacturer_id
+    ON public.groups USING btree (manufacturer_id)
+    WHERE manufacturer_id IS NOT NULL;
+
+-- /product offers lookup & materialized view refresh
+CREATE INDEX IF NOT EXISTS idx_products_group_id
+    ON public.products USING btree (group_id)
+    WHERE group_id IS NOT NULL;
+
 -- feature extraction work queue
 CREATE INDEX IF NOT EXISTS idx_products_features_pending
     ON public.products USING btree (id)
@@ -228,13 +238,16 @@ CREATE TABLE IF NOT EXISTS public.bge_text_embeddings (
 -- from ON CONFLICT.
 
 -- ---------------------------------------------------------------------------
--- API-facing view: one row per group, in-stock products only, cheapest first
+-- API-facing materialized read models (refreshed CONCURRENTLY by pipeline/scrapers)
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.grouped_products AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.grouped_products AS
 SELECT g.id AS group_id,
        g.name AS group_name,
        g.main_category,
        g.sub_category,
+       g.manufacturer_id,
+       array_agg(DISTINCT p.market) AS markets,
+       min(p.price) AS min_price,
        json_agg(json_build_object(
            'product_id', p.id,
            'name', p.name,
@@ -248,7 +261,41 @@ SELECT g.id AS group_id,
 FROM public.groups g
 JOIN public.products p ON p.group_id = g.id
 WHERE p.in_stock = true
-GROUP BY g.id;
+GROUP BY g.id
+WITH DATA;
+
+-- Unique index enables REFRESH MATERIALIZED VIEW CONCURRENTLY and /search PK joins
+CREATE UNIQUE INDEX IF NOT EXISTS idx_grouped_products_group_id
+    ON public.grouped_products USING btree (group_id);
+
+-- /manufacturer hot path: pure ordered range scan, zero join, zero sort
+CREATE INDEX IF NOT EXISTS idx_grouped_products_manufacturer_name
+    ON public.grouped_products USING btree (manufacturer_id, group_name)
+    WHERE manufacturer_id IS NOT NULL;
+
+-- /{main}/{sub} hot path: covering index with INCLUDE (markets) for index-only counts
+-- and market-filtered page slices without JSON deserialization
+CREATE INDEX IF NOT EXISTS idx_grouped_products_category_name
+    ON public.grouped_products USING btree (main_category, sub_category, group_name)
+    INCLUDE (markets);
+
+-- O(1) manufacturer header stats (groups, categories, markets)
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.manufacturer_stats AS
+SELECT g.manufacturer_id,
+       count(DISTINCT g.id)::int AS groups,
+       count(DISTINCT g.main_category)::int AS categories,
+       count(DISTINCT p.market)::int AS markets
+FROM public.groups g
+JOIN public.products p ON p.group_id = g.id
+WHERE g.manufacturer_id IS NOT NULL
+  AND p.in_stock = true
+GROUP BY g.manufacturer_id
+WITH DATA;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_manufacturer_stats_manufacturer_id
+    ON public.manufacturer_stats USING btree (manufacturer_id);
 
 ANALYZE public.products;
 ANALYZE public.groups;
+ANALYZE public.grouped_products;
+ANALYZE public.manufacturer_stats;

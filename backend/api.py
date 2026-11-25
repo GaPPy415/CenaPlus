@@ -1,24 +1,73 @@
+from contextlib import contextmanager
 from enum import Enum
+import os
 import uuid as uuid_lib
 
+from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
 
 from backend.data.constants import CATEGORIES
-from backend.data.db_utils import connect_to_db
 from backend.data.text_utils import normalize_string, strip_quantity_tokens
 
 app = FastAPI()
-conn = connect_to_db()
-# Read-only endpoints: commit per statement so the shared connection never sits
-# "idle in transaction" (it held ACCESS SHARE locks and blocked DDL indefinitely).
-conn.autocommit = True
 
 # `/search` uses pg_trgm over the canonical product name; a name is a match when
 # similarity clears this floor. Brands live outside product_name, so the query
 # matches manufacturer names too.
 SEARCH_SIMILARITY_THRESHOLD = 0.8
+
+
+def _create_pool() -> ThreadedConnectionPool:
+    load_dotenv(find_dotenv())
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    database = os.getenv("POSTGRES_DB", "postgres")
+    pool = ThreadedConnectionPool(
+        minconn=1,
+        maxconn=int(os.getenv("DB_POOL_MAX", "10")),
+        host=host,
+        port=port,
+        database=database,
+        user=os.getenv("POSTGRES_USER", "user"),
+        password=os.getenv("POSTGRES_PASSWORD", "password"),
+    )
+    print(f"Connected to PostgreSQL pool at {host}:{port}, db '{database}'")
+    return pool
+
+
+db_pool = _create_pool()
+
+
+@contextmanager
+def get_cursor():
+    """Borrow an autocommit RealDictCursor from the thread-safe pool.
+
+    Each newly opened connection sets autocommit=True (so read-only endpoints
+    never sit 'idle in transaction' holding ACCESS SHARE locks) and aligns
+    pg_trgm.similarity_threshold with SEARCH_SIMILARITY_THRESHOLD so GIN index
+    scans prune non-matches before touching heap pages.
+    """
+    conn = db_pool.getconn()
+    broken = False
+    try:
+        if not conn.autocommit:
+            conn.autocommit = True
+            with conn.cursor() as init_cur:
+                init_cur.execute(
+                    "SELECT set_config('pg_trgm.similarity_threshold', %s, false)",
+                    (str(SEARCH_SIMILARITY_THRESHOLD),),
+                )
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            yield cur
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        raise
+    finally:
+        db_pool.putconn(conn, close=broken)
 
 
 app.add_middleware(
@@ -65,19 +114,14 @@ SEARCH_SQL = """
     matched AS (
         SELECT id, max(sim) AS similarity FROM candidates GROUP BY id
     )
-    SELECT g.id AS group_id,
-           g.name AS group_name,
-           g.main_category,
-           g.sub_category,
+    SELECT gp.group_id,
+           gp.group_name,
+           gp.main_category,
+           gp.sub_category,
            matched.similarity,
-           json_agg(json_build_object(
-               'product_id', p.id, 'name', p.name, 'price', p.price, 'market', p.market,
-               'in_stock', p.in_stock, 'image', p.image, 'link', p.link,
-               'singular_price', p.singular_price) ORDER BY p.price) AS products
+           gp.products
     FROM matched
-    JOIN groups g ON g.id = matched.id
-    JOIN products p ON p.group_id = g.id AND p.in_stock = true
-    GROUP BY g.id, g.name, g.main_category, g.sub_category, matched.similarity
+    JOIN grouped_products gp ON gp.group_id = matched.id
     ORDER BY matched.similarity DESC
 """
 
@@ -90,38 +134,22 @@ def search_products(q: str = Query(..., min_length=1)):
     assembled from user input, so `%`, quotes and `;` cannot alter it.
     """
     needle = strip_quantity_tokens(normalize_string(q)) or (normalize_string(q) or q.strip().lower())
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+    with get_cursor() as cur:
         cur.execute(SEARCH_SQL, {"q": needle, "threshold": SEARCH_SIMILARITY_THRESHOLD})
         rows = cur.fetchall()
     return {"data": rows}
 
 
 MANUFACTURER_GROUPS_SQL = """
-    SELECT gp.group_id,
-           gp.group_name,
-           gp.main_category,
-           gp.sub_category,
-           gp.products
-    FROM grouped_products gp
-    JOIN groups g ON g.id = gp.group_id
-    WHERE g.manufacturer_id = %s
-    ORDER BY gp.group_name
+    SELECT group_id,
+           group_name,
+           main_category,
+           sub_category,
+           products
+    FROM grouped_products
+    WHERE manufacturer_id = %s
+    ORDER BY group_name
     LIMIT %s OFFSET %s
-"""
-
-MANUFACTURER_TOTAL_SQL = """
-    SELECT count(*) AS total,
-           count(DISTINCT g.main_category) AS categories
-    FROM grouped_products gp
-    JOIN groups g ON g.id = gp.group_id
-    WHERE g.manufacturer_id = %s
-"""
-
-MANUFACTURER_MARKETS_SQL = """
-    SELECT count(DISTINCT p.market) AS markets
-    FROM products p
-    JOIN groups g ON g.id = p.group_id
-    WHERE g.manufacturer_id = %s AND p.in_stock = true
 """
 
 RESOLVE_MANUFACTURER_SQL = """
@@ -144,12 +172,22 @@ RESOLVE_MANUFACTURER_SQL = """
         FROM manufacturers m
         JOIN chain c ON m.id = c.merged_into
         WHERE c.merged_into IS NOT NULL
+    ),
+    resolved AS (
+        SELECT id, canonical_name, display_name
+        FROM chain
+        WHERE merged_into IS NULL
+        ORDER BY priority, depth
+        LIMIT 1
     )
-    SELECT id, canonical_name, display_name
-    FROM chain
-    WHERE merged_into IS NULL
-    ORDER BY priority, depth
-    LIMIT 1
+    SELECT r.id,
+           r.canonical_name,
+           r.display_name,
+           COALESCE(ms.groups, 0) AS groups,
+           COALESCE(ms.categories, 0) AS categories,
+           COALESCE(ms.markets, 0) AS markets
+    FROM resolved r
+    LEFT JOIN manufacturer_stats ms ON ms.manufacturer_id = r.id
 """
 
 
@@ -165,30 +203,29 @@ def get_manufacturer_products(
     per_page_value = int(getattr(per_page, "value", per_page))
     needle = normalize_string(manufacturer_name) or manufacturer_name.strip().lower()
 
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+    with get_cursor() as cur:
         cur.execute(RESOLVE_MANUFACTURER_SQL, (needle, needle))
         manufacturer = cur.fetchone()
         if not manufacturer:
             raise HTTPException(404, "Manufacturer not found")
 
-        cur.execute(MANUFACTURER_TOTAL_SQL, (manufacturer["id"],))
-        totals = cur.fetchone()
-        cur.execute(MANUFACTURER_MARKETS_SQL, (manufacturer["id"],))
-        markets = cur.fetchone()["markets"]
-
-        offset = per_page_value * (page - 1)
-        cur.execute(MANUFACTURER_GROUPS_SQL, (manufacturer["id"], per_page_value, offset))
-        rows = cur.fetchall()
+        total = manufacturer["groups"]
+        if total > 0:
+            offset = per_page_value * (page - 1)
+            cur.execute(MANUFACTURER_GROUPS_SQL, (manufacturer["id"], per_page_value, offset))
+            rows = cur.fetchall()
+        else:
+            rows = []
 
     return {
         "manufacturer": {
             "name": manufacturer["canonical_name"],
             "display_name": manufacturer["display_name"] or manufacturer["canonical_name"],
-            "groups": totals["total"],
-            "categories": totals["categories"],
-            "markets": markets,
+            "groups": total,
+            "categories": manufacturer["categories"],
+            "markets": manufacturer["markets"],
         },
-        "total": totals["total"],
+        "total": total,
         "page": page,
         "per_page": per_page_value,
         "data": rows,
@@ -207,7 +244,7 @@ def get_product_detail(g_id: str = Query(..., description="Group id (uuid)")):
     except (ValueError, AttributeError, TypeError):
         raise HTTPException(400, "Invalid group id")
 
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+    with get_cursor() as cur:
         cur.execute(
             """
             SELECT g.id AS group_id,
@@ -269,6 +306,37 @@ def get_product_detail(g_id: str = Query(..., description="Group id (uuid)")):
     }
 
 
+SUBCATEGORY_GROUPS_SQL = """
+    SELECT group_id, group_name, main_category, sub_category, products
+    FROM grouped_products
+    WHERE main_category = %s AND sub_category = %s
+    ORDER BY group_name
+    LIMIT %s OFFSET %s
+"""
+
+SUBCATEGORY_COUNT_SQL = """
+    SELECT COUNT(*)
+    FROM grouped_products
+    WHERE main_category = %s AND sub_category = %s
+"""
+
+SUBCATEGORY_GROUPS_MARKET_SQL = """
+    SELECT group_id, group_name, main_category, sub_category, products
+    FROM grouped_products
+    WHERE main_category = %s AND sub_category = %s
+      AND markets && %s::text[]
+    ORDER BY group_name
+    LIMIT %s OFFSET %s
+"""
+
+SUBCATEGORY_COUNT_MARKET_SQL = """
+    SELECT COUNT(*)
+    FROM grouped_products
+    WHERE main_category = %s AND sub_category = %s
+      AND markets && %s::text[]
+"""
+
+
 @app.get("/{main_category}/{sub_category}")
 def get_grouped_products(
     main_category: str,
@@ -282,53 +350,28 @@ def get_grouped_products(
     if sub_category not in CATEGORIES[main_category]:
         raise HTTPException(404, "Sub-category not found")
 
-    offset = per_page.value * (page - 1)
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+    per_page_value = int(getattr(per_page, "value", per_page))
+    offset = per_page_value * (page - 1)
+    with get_cursor() as cur:
         if market:
             cur.execute(
-                """
-                SELECT * FROM grouped_products gp
-                WHERE main_category = %s AND sub_category = %s
-                  AND EXISTS (
-                    SELECT 1 FROM json_array_elements(gp.products) AS elem
-                    WHERE elem->>'market' = ANY(%s)
-                  )
-                ORDER BY group_name
-                LIMIT %s OFFSET %s
-                """,
-                (main_category, sub_category, market, per_page.value, offset),
+                SUBCATEGORY_GROUPS_MARKET_SQL,
+                (main_category, sub_category, market, per_page_value, offset),
             )
             rows = cur.fetchall()
-
             cur.execute(
-                """
-                SELECT COUNT(*) FROM grouped_products gp
-                WHERE main_category = %s AND sub_category = %s
-                  AND EXISTS (
-                    SELECT 1 FROM json_array_elements(gp.products) AS elem
-                    WHERE elem->>'market' = ANY(%s)
-                  )
-                """,
+                SUBCATEGORY_COUNT_MARKET_SQL,
                 (main_category, sub_category, market),
             )
             total = cur.fetchone()["count"]
         else:
             cur.execute(
-                """
-                SELECT * FROM grouped_products
-                WHERE main_category = %s AND sub_category = %s
-                ORDER BY group_name
-                LIMIT %s OFFSET %s
-                """,
-                (main_category, sub_category, per_page.value, offset),
+                SUBCATEGORY_GROUPS_SQL,
+                (main_category, sub_category, per_page_value, offset),
             )
             rows = cur.fetchall()
-
             cur.execute(
-                """
-                SELECT COUNT(*) FROM grouped_products
-                WHERE main_category = %s AND sub_category = %s
-                """,
+                SUBCATEGORY_COUNT_SQL,
                 (main_category, sub_category),
             )
             total = cur.fetchone()["count"]
@@ -336,6 +379,6 @@ def get_grouped_products(
     return {
         "total": total,
         "page": page,
-        "per_page": per_page.value,
+        "per_page": per_page_value,
         "data": rows,
     }

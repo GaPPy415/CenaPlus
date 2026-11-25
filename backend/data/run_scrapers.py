@@ -51,6 +51,9 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True) -> Dict[s
         env = os.environ.copy()
         env["PYTHONPATH"] = os.pathsep.join([PROJECT_ROOT, str(script_path.parent)])
         env["PYTHONIOENCODING"] = "utf-8"
+        # Refresh materialized views once after all scrapers finish so parallel
+        # workers do not contend on REFRESH MATERIALIZED VIEW locks.
+        env["CENAPLUS_SKIP_VIEW_REFRESH"] = "1"
 
         try:
             proc = subprocess.Popen(
@@ -125,6 +128,7 @@ def main() -> int:
     parser.add_argument("--logs-dir", default=str(Path(__file__).parent / "logs"), help="Where to store logs")
     parser.add_argument("--parallel", type=int, default=0, help="Run in parallel with N workers (0 = sequential)")
     parser.add_argument("--dry-run", action="store_true", help="List scripts without executing")
+    parser.add_argument("--no-refresh", action="store_true", help="Skip refreshing API materialized views after scraping")
     args = parser.parse_args()
 
     scraper_dir = Path(args.scrapers_dir).resolve()
@@ -173,6 +177,15 @@ def main() -> int:
         print(f"{r['name']:<25} {r['status']:<6} {r['duration_seconds']!s:>6}s  log: {r['log_file']}")
     print(f"Total: {len(summary)}, Passed: {passed}, Failed: {failed}, Accumulated time: {total_time}s")
     print(f"Summary file: {summary_path}")
+
+    if passed > 0 and not args.no_refresh:
+        from backend.data.db_utils import connect_to_db, refresh_read_views
+
+        conn = connect_to_db()
+        try:
+            refresh_read_views(conn)
+        finally:
+            conn.close()
 
     return 0 if failed == 0 else 1
 

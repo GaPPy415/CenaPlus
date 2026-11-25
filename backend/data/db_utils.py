@@ -144,6 +144,50 @@ def mark_out_of_stock_products_table(
     return len(ids_to_update)
 
 
+READ_MODEL_MATVIEWS = ("grouped_products", "manufacturer_stats")
+
+
+def refresh_read_views(
+    conn: psycopg2.extensions.connection,
+    *,
+    concurrently: bool = True,
+) -> list[str]:
+    """Refresh materialized read-model views used by the API.
+
+    Uses ``CONCURRENTLY`` when a view is already populated so live readers never
+    block. Missing views (e.g. minimal test schemas) are skipped cleanly.
+    """
+    refreshed: list[str] = []
+    if not conn.autocommit:
+        conn.commit()
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT matviewname, ispopulated
+            FROM pg_matviews
+            WHERE schemaname = 'public' AND matviewname = ANY(%s)
+            """,
+            (list(READ_MODEL_MATVIEWS),),
+        )
+        present = dict(cursor.fetchall())
+
+        for view_name in READ_MODEL_MATVIEWS:
+            if view_name not in present:
+                continue
+            start = time.perf_counter()
+            mode = "CONCURRENTLY " if (concurrently and present[view_name]) else ""
+            cursor.execute(f"REFRESH MATERIALIZED VIEW {mode}public.{view_name}")
+            cursor.execute(f"ANALYZE public.{view_name}")
+            if not conn.autocommit:
+                conn.commit()
+            refreshed.append(view_name)
+            print(
+                f"Refreshed materialized view {view_name} "
+                f"({mode.strip().lower() or 'blocking'}) in {time.perf_counter() - start:.2f}s"
+            )
+    return refreshed
+
+
 def save_products_to_products_table(conn: psycopg2.extensions.connection, market: str, products_to_upsert: list, all_product_names: set):
     """Upsert a market's products, then mark the leftovers out of stock.
 
@@ -163,6 +207,8 @@ def save_products_to_products_table(conn: psycopg2.extensions.connection, market
     mark_start = time.time()
     marked = mark_out_of_stock_products_table(conn, market, names)
     print(f"Marked {marked} products out of stock in {round(time.time() - mark_start, 2)}s")
+    if os.getenv("CENAPLUS_SKIP_VIEW_REFRESH") != "1":
+        refresh_read_views(conn)
     conn.close()
 
 

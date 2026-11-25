@@ -37,8 +37,11 @@ Run everything from the repo root.
 3. **The DB schema lives in `init/00_schema.sql`** — one idempotent file that creates the
    extensions (`uuid-ossp`, `vector`, `pg_trgm`), tables (`manufacturers`, `manufacturer_aliases`,
    `products`, `groups`, `product_name_token_aliases`, `bge_text_embeddings`), constraints, indexes,
-   the timestamp trigger and the `grouped_products` view. It is a *fresh-database bootstrap*: apply
-   schema changes to a live DB with explicit statements, then fold them back into that file.
+   the timestamp trigger, and the materialized read-model views (`grouped_products`,
+   `manufacturer_stats`). It is a *fresh-database bootstrap*: apply schema changes to a live DB with
+   explicit statements, then fold them back into that file. Scrapers and `group_products.py --apply`
+   auto-refresh the materialized views via `refresh_read_views()` (`REFRESH MATERIALIZED VIEW
+   CONCURRENTLY`); for manual DB edits run `python -m backend.data.tools.refresh_views`.
 4. `backend/api.py` connects to Postgres **at import time** — importing it needs a reachable DB.
    The API requires **no `GOOGLE_API_KEY`** (search is `pg_trgm`); `GOOGLE_API_KEY` is only needed
    by the `categorize_products` and `extract_features` pipeline stages.

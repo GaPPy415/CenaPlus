@@ -43,7 +43,7 @@ from collections import Counter, defaultdict
 from dotenv import find_dotenv, load_dotenv
 from psycopg2.extras import RealDictCursor, execute_values
 
-from backend.data.db_utils import connect_to_db
+from backend.data.db_utils import connect_to_db, refresh_read_views
 from backend.data.grouping_rules import (
     CORE_GROCERY_CATEGORIES,
     NON_FOOD_CATEGORIES,
@@ -706,6 +706,7 @@ def main() -> int:
         execute_values(write_cur, INSERT_GROUPS_SQL, payload, page_size=1000)
         execute_values(write_cur, UPDATE_PRODUCTS_SQL, member_updates, page_size=1000)
     conn.commit()
+    refresh_read_views(conn)
 
     with conn.cursor(cursor_factory=RealDictCursor) as check:
         check.execute("""
