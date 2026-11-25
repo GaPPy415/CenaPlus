@@ -43,27 +43,29 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
       <div className="px-4 pb-2 pt-3">
         {showCategory && (group.main_category || group.sub_category) && (
           <div className="mb-1.5 block">
-            <span
-              title={
-                group.main_category && group.sub_category
-                  ? `${group.main_category} → ${group.sub_category}`
-                  : group.main_category || group.sub_category
-              }
-              className="inline-flex max-w-full items-center gap-1 rounded-md bg-muted/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-            >
-              {group.main_category && (
+            {group.main_category && group.sub_category ? (
+              <Link
+                to={`/?category=${encodeURIComponent(group.main_category)}&sub=${encodeURIComponent(group.sub_category)}`}
+                title={`${group.main_category} → ${group.sub_category}`}
+                className="group/cat inline-flex max-w-full items-center gap-1 rounded-md bg-muted/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors duration-150 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 <span className="truncate">{group.main_category}</span>
-              )}
-              {group.main_category && group.sub_category && (
                 <ChevronRight
-                  className="h-3 w-3 shrink-0 text-muted-foreground/60"
+                  className="h-3 w-3 shrink-0 text-muted-foreground/60 transition-colors duration-150 group-hover/cat:text-primary/70"
                   aria-hidden="true"
                 />
-              )}
-              {group.sub_category && (
-                <span className="truncate text-foreground/80">{group.sub_category}</span>
-              )}
-            </span>
+                <span className="truncate text-foreground/80 transition-colors duration-150 group-hover/cat:text-primary">
+                  {group.sub_category}
+                </span>
+              </Link>
+            ) : (
+              <span
+                title={group.main_category || group.sub_category}
+                className="inline-flex max-w-full items-center gap-1 rounded-md bg-muted/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+              >
+                <span className="truncate">{group.main_category || group.sub_category}</span>
+              </span>
+            )}
           </div>
         )}
         <Link
