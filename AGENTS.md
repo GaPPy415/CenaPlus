@@ -1,13 +1,12 @@
 # CenaPlus — Agent Guidelines
 
 Macedonian grocery price-comparison app. Twelve market scrapers write into one PostgreSQL `products`
-table; Gemini categorizes and extracts features, embeddings are kept as a search fallback, and grouping
-is deterministic (manufacturer + name + size + variant). FastAPI serves the grouped view to a React SPA.
+table; Gemini categorizes and extracts features, and grouping is non-LLM (Layers 1–4 deterministic/IR +
+Layer 5 local Ollama `bge-m3` cache). FastAPI serves the grouped view to a React SPA.
 
 ```
 scrape → categorize + extract features (gemini-3.1-flash-lite)
-       → embed (gemini-embedding-001, 768d, search fallback)
-       → group (deterministic) → FastAPI → React
+       → group (Layers 1–4 IR + Layer 5 Ollama bge-m3 cache) → FastAPI → React
 ```
 
 ## Commands
@@ -19,72 +18,68 @@ Run everything from the repo root.
 - `bun install`, `bun run dev` — Vite on :8080, proxies `/api/*` → `http://127.0.0.1:8000/*` (prefix stripped)
 - `bun run test` / `bun run test:watch` — single file: `bunx vitest run src/test/categories-sync.test.ts`
 - `bunx tsc -b` — the **only** typecheck. `bun run build` is `vite build` and does not typecheck.
-- `bun run lint` — currently 0 errors, 7 pre-existing `react-refresh` warnings
+- `bun run lint` — currently 0 errors, 2 pre-existing `react-refresh` warnings
 
 **API / pipeline:**
 
 - `uvicorn backend.api:app --reload`
 - `python -m backend.data.run_scrapers [--parallel N] [--dry-run]`
-- `python -m backend.data.categorize_products` / `.extract_features` / `.embed_products` / `.group_products --apply`
-- Full pipeline: `python backend/data/run_pipeline.py`
+- `python -m backend.data.categorize_products` / `.extract_features` / `.group_products --apply`
+- Full pipeline: `python backend/data/run_pipeline.py` (or `python -m backend.data.run_pipeline`)
 
 ## Gotchas
 
-1. **`python -m backend.data.run_pipeline` fails** (`ModuleNotFoundError: No module named 'run_scrapers'`).
-   `run_pipeline.py` imports `run_scrapers` unqualified, so it only works in script mode, where
-   `sys.path[0]` is `backend/data/`. The other stages work with `-m`.
-2. **No package `__init__.py` files anywhere** — everything relies on namespace packages plus
+1. **No package `__init__.py` files anywhere** — everything relies on namespace packages plus
    `PYTHONPATH`. Always import absolutely (`from backend.data.db_utils import ...`).
-3. **Scrapers are launched as standalone scripts**, not modules: `run_scrapers.py` spawns each
+2. **Scrapers are launched as standalone scripts**, not modules: `run_scrapers.py` spawns each
    `*_scraper.py` with `cwd=scrapers/` and `PYTHONPATH=<root>:<scrapers/>`. So a scraper imports
    siblings unqualified (`from kam_pdf_utils import ...`) and project code absolutely.
-4. **The DB schema lives in `init/00_schema.sql`** — one idempotent file that creates the
-   extensions (`uuid-ossp`, `vector`), all four tables, constraints, every index, the timestamp
-   trigger and the `grouped_products` view. It is a *fresh-database bootstrap*: apply schema
-   changes to a live DB with explicit statements, then fold them back into that file.
-5. `backend/api.py` connects to Postgres **at import time** — importing it (or `pytest`-collecting it)
-   needs a reachable DB. The Gemini client is lazy, so `GOOGLE_API_KEY` is only required for
-   `/search/semantic` and the pipeline stages.
-6. `VITE_API_BASE_URL` defaults to `/api` (relative), not `http://localhost:8000`. Dev uses the Vite
+3. **The DB schema lives in `init/00_schema.sql`** — one idempotent file that creates the
+   extensions (`uuid-ossp`, `vector`, `pg_trgm`), tables (`manufacturers`, `manufacturer_aliases`,
+   `products`, `groups`, `product_name_token_aliases`, `bge_text_embeddings`), constraints, indexes,
+   the timestamp trigger and the `grouped_products` view. It is a *fresh-database bootstrap*: apply
+   schema changes to a live DB with explicit statements, then fold them back into that file.
+4. `backend/api.py` connects to Postgres **at import time** — importing it needs a reachable DB.
+   The API requires **no `GOOGLE_API_KEY`** (search is `pg_trgm`); `GOOGLE_API_KEY` is only needed
+   by the `categorize_products` and `extract_features` pipeline stages.
+5. `VITE_API_BASE_URL` defaults to `/api` (relative), not `http://localhost:8000`. Dev uses the Vite
    proxy, production uses nginx — both strip the `/api` prefix.
-7. `nginx.conf` gates `/api/` on `valid_referers` (localhost, `(www.)cenaplus.net`) and rate-limits
+6. `nginx.conf` gates `/api/` on `valid_referers` (localhost, `(www.)cenaplus.net`) and rate-limits
    `10r/s` burst 10 per IP. Direct `curl` / non-browser clients get **403**; that is intentional.
-8. `Dockerfile.frontend` runs `bun install --frozen-lockfile`. Add deps with `bun add` and commit
-   `bun.lockb`; `package-lock.json` also exists but is not used by the build.
-9. `docker-compose.yml` publishes **no port for the backend**; the frontend container is the only
+7. `Dockerfile.frontend` runs `bun install --frozen-lockfile`. Add/remove deps with `bun add` /
+   `bun remove` and commit `bun.lockb`.
+8. `docker-compose.yml` publishes **no port for the backend**; the frontend container is the only
    entrypoint (`:8080`) and proxies `/api/` to `backend:8000`. For host-side dev use uvicorn directly.
-10. `.dockerignore` excludes `*.md`, `deprecated/` and `init/` (init is mounted by compose, not baked).
-11. All Gemini calls go through `RateLimiter` (`get_rate_limiter(...)`). The two text-model stages
+9. `.dockerignore` excludes `*.md`, `deprecated/` and `init/` (init is mounted by compose, not baked).
+10. All Gemini calls go through `RateLimiter` (`get_rate_limiter(...)`). The two text-model stages
     (`categorize_products.py`, `extract_features.py`) share one scope, so the rolling 60 s window is
-    carried across the `run_pipeline.py` subprocess boundary; `embed_products.py` has its own
-    `gemini-embedding` scope. Budgets come from `GEMINI_RPM_LIMIT` / `GEMINI_TPM_LIMIT` (defaults
-    3850 RPM / 3.85M TPM) and are lowered automatically to the `quotaValue` the server reports in a
-    429. Do not bypass `await rate_limiter.acquire(tokens)` — use `call_with_retries(...)` instead.
-12. Two Gemini clients coexist by design: `text_utils.py` uses the langchain
-    `GoogleGenerativeAIEmbeddings` wrapper; `categorize_products.py` uses the raw `google-genai` client
-    with Pydantic `response_schema`. Don't unify them.
-13. `products.etl_loadtime` = when the row **first** entered the warehouse (never rewritten);
+    carried across the `run_pipeline.py` subprocess boundary. Budgets come from `GEMINI_RPM_LIMIT` /
+    `GEMINI_TPM_LIMIT` (defaults 3850 RPM / 3.85M TPM) and are lowered automatically to the
+    `quotaValue` the server reports in a 429. Do not bypass `await rate_limiter.acquire(tokens)` —
+    use `call_with_retries(...)` instead.
+11. `products.etl_loadtime` = when the row **first** entered the warehouse (never rewritten);
     `products.last_updated` = when a **scraped** field last actually changed. `bulk_upsert_products_table`
     enforces both in SQL and a `BEFORE INSERT OR UPDATE` trigger (`init/00_schema.sql`)
-    enforces them for direct writes. Pipeline stages (categorization, embeddings, grouping) must not
+    enforces them for direct writes. Pipeline stages (categorization, extraction, grouping) must not
     bump either one. Both are naive `timestamp` columns written with Python local time while the DB
-    session runs `Etc/UTC`, so never author these from SQL `now()`; see the migration comment.
+    session runs `Etc/UTC`, so never author these from SQL `now()`.
 
 ## Pipeline stages are incremental (grouping is a full rebuild)
 
 - Scrapers upsert by market and mark unseen names out of stock (`mark_out_of_stock_products_table`).
-  An upsert whose rows are unchanged writes nothing at all (see gotcha 13).
+  An upsert whose rows are unchanged writes nothing at all (see gotcha 11).
 - `categorize_products.py` re-picks rows with `main_category IS NULL`, `confidence IS NULL` or `< 0.5`.
 - `extract_features.py` re-picks rows missing the extracted fields and writes `manufacturer_id`,
   `product_name_sorted`, `quantity_value/unit`, `is_fluid`. A batch that fails stays unsaved so the
   next run retries it (no `Разно`/0.0 fallback).
-- `embed_products.py` only touches rows with `name_embedding IS NULL`. The vectors are now a **search
-  fallback**; grouping no longer uses them.
 - `group_products.py` is **not** incremental: it requires `--dry-run` or `--apply`, and `--apply`
   truncates `groups`, rewrites every `products.group_id`, and seeds singleton groups for rows without
-  extracted features. Grouping is deterministic — blocks of (manufacturer, canonical name, quantity,
-  unit, fluid) refined by the variant rules in `grouping_rules.py`; same-market rows merge only when
-  their variants are compatible. There are no similarity thresholds.
+  extracted features. Grouping runs 5 non-LLM layers: Layer 1 unified `(manufacturer, base_qty)`
+  blocking + `singular_price` qty recovery + raw safety specs + token aliases, Layers 2–4 pure-IR
+  matcher (same-market differentiators, Block-IDF, phonetic/prefix alignment, MNN), and Layer 5
+  optional Ollama `bge-m3` (`bge_text_embeddings` cache, Core Groceries + same `sub_category` only;
+  skips cleanly if Ollama is offline or `--no-embeddings`). Display titles use a 4-tier rule
+  (`reptil` → `bigshop` → synthesized `Brand – Product Size` with Latin units → cleanest raw name).
 
 Re-running any stage is safe; running them out of order is not (extraction needs categories, grouping
 needs extraction).
@@ -94,15 +89,13 @@ needs extraction).
 | Path | Owns |
 | ---- | ---- |
 | `shared/categories.json` | **Single source of truth** for the taxonomy (21 main, 120 sub) |
-| `backend/api.py` | FastAPI: `/health`, `/categories`, `/search` (pg_trgm fuzzy), `/search/semantic` (embedding fallback), `/product?g_id=` (detail), `/manufacturer?manufacturer_name=` (all groups by brand), `/{main}/{sub}` |
-| `backend/data/` | Pipeline stage scripts (`categorize_products`, `extract_features`, `embed_products`, `group_products`), `db_utils.py`, `text_utils.py`, `RateLimiter.py` |
+| `backend/api.py` | FastAPI: `/health`, `/categories`, `/search` (pg_trgm fuzzy), `/product?g_id=` (detail), `/manufacturer?manufacturer_name=` (all groups by brand), `/{main}/{sub}` |
+| `backend/data/` | Pipeline stages (`run_pipeline`, `run_scrapers`, `categorize_products`, `extract_features`, `group_products`), `grouping_rules.py`, `local_embeddings.py`, `db_utils.py`, `text_utils.py`, `constants.py`, `RateLimiter.py` |
+| `backend/data/tools/` | Manual maintenance CLIs: `grouping_keys.py`, `manufacturer_merges.py`, `product_name_aliases.py` |
 | `backend/data/scrapers/` | One `{Market}_scraper.py` per market (all subclass `scraper_base.MarketScraper`), auto-discovered by `run_scrapers.py` |
-| `backend/data/grouping_rules.py` | Variant/normalisation rules shared by `group_products.py` and the collision tooling |
-| `backend/data/manufacturer_merges.py` | Manufacturer alias/merge tool (`propose`, `--csv`, `--apply`, `--pair`) writing `merged_into` |
-| `backend/data/product_name_aliases.py` | Token-level product-name spelling aliases (`алпен`/`алпине` → `алпин`); propose/report/apply, resolved by the grouper |
 | `backend/tests/` | stdlib `unittest` suite; no `__init__.py`, so run module paths |
 | `backend/data/logs/` | Per-scraper logs + `run_summary-*.json` (untracked; `*.log` is git-ignored) |
-| `src/` | React SPA; `src/components/ui/` is generated shadcn/ui |
+| `src/` | React SPA; `src/components/ui/` holds only the 7 used shadcn/ui primitives |
 | `init/` | `00_schema.sql` — the whole schema (extensions, tables, indexes, trigger, view), mounted into `docker-entrypoint-initdb.d` |
 
 Per-directory detail: `backend/data/AGENTS.md`, `backend/data/scrapers/AGENTS.md`.
@@ -115,7 +108,7 @@ tokens in `tailwind.config.ts`.
 | Key | Scraper | Method |
 | --- | ------- | ------ |
 | `reptil` | `Reptil_scraper.py` | WooCommerce Store API (marketonline.mk) |
-| `bigshop` | `Bigshop_scraper.py` | WooCommerce Store API (bigshop.mk) |
+| `bigshop` | `Bigshop_scraper_maintenance.py` | WooCommerce Store API (bigshop.mk) |
 | `zito` | `Zito_scraper.py` | HTML (zito.proverkanaceni.mk) |
 | `stokomak` | `Stokomak_scraper.py` | HTML (stokomak.proverkanaceni.mk) |
 | `vero` | `Vero_scraper.py` | HTML price list (pricelist.vero.com.mk) |
@@ -142,8 +135,7 @@ tokens in `tailwind.config.ts`.
 - Server state via TanStack Query (`src/lib/api.ts` is the only fetch layer); the API returns
   `{ total, page, per_page, data }` for listings and `{ data }` for search.
 - `/search` is **pg_trgm fuzzy matching** over `groups.product_name` + manufacturer names
-  (similarity ≥ 0.8, ordered by similarity, no row cap); `/search/semantic` keeps the old
-  768-dim cosine path as a fallback and is the only endpoint needing `GOOGLE_API_KEY`.
+  (similarity ≥ 0.8, ordered by similarity, no row cap).
 - Cart is frontend-only: `src/context/CartContext.tsx` persists to `localStorage["cenaplus_cart"]`.
   There is no cart API or checkout.
 - All UI copy, categories and product names are Macedonian Cyrillic. Keep new strings Cyrillic.
@@ -163,14 +155,12 @@ Dependency files: `requirements.txt` (full), `requirements-api.txt` (what the ba
 
 ## Known state
 
-- Tests: 8 Python `unittest` modules in `backend/tests/` (run as module paths, no `__init__.py`) and
-  2 Vitest files. `src/test/categories-sync.test.ts` asserts the TS taxonomy matches
-  `shared/categories.json` and has exactly 21 main categories — update both sides together.
+- Tests: 10 Python `unittest` modules in `backend/tests/` (run as module paths, no `__init__.py`) and
+  1 Vitest file (`src/test/categories-sync.test.ts`, which asserts the TS taxonomy matches
+  `shared/categories.json` and has exactly 21 main categories — update both sides together).
 - No CI, no migration tool (schema is bootstrapped by `init/00_schema.sql`; live changes are applied
   by hand and folded back into that file), no auth
   (CORS: `localhost:8080`, `cenaplus.net`, `www.cenaplus.net`).
-- Local scratch that is not part of the app: `shto.*`, `tamaro_products.json`, `nul`,
-  `backend/data/grouper_new.py`, `backend/data/ungrouped.py`, `backend/data/deprecated/`.
 
 <!-- BEGIN opencode-rag -->
 ## Code Navigation
