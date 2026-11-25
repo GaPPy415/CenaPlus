@@ -42,7 +42,8 @@ class ApiReadModelTests(unittest.TestCase):
                     """
                     SELECT count(DISTINCT g.id),
                            count(DISTINCT g.main_category),
-                           count(DISTINCT p.market)
+                           count(DISTINCT p.market),
+                           max(p.last_updated)
                     FROM manufacturers m
                     JOIN groups g ON g.manufacturer_id = m.id
                     JOIN products p ON p.group_id = g.id AND p.in_stock = true
@@ -50,12 +51,13 @@ class ApiReadModelTests(unittest.TestCase):
                     """,
                     (mfr_name,),
                 )
-                expected_groups, expected_cats, expected_markets = cur.fetchone()
+                expected_groups, expected_cats, expected_markets, expected_last_updated = cur.fetchone()
 
                 self.assertEqual(res["total"], expected_groups, name)
                 self.assertEqual(res["manufacturer"]["groups"], expected_groups, name)
                 self.assertEqual(res["manufacturer"]["categories"], expected_cats, name)
                 self.assertEqual(res["manufacturer"]["markets"], expected_markets, name)
+                self.assertEqual(res["manufacturer"]["last_updated"], expected_last_updated, name)
                 self.assertEqual(len(res["data"]), min(12, expected_groups), name)
                 self.assertEqual(
                     sum(s["count"] for s in res["subcategories"]),
@@ -112,6 +114,68 @@ class ApiReadModelTests(unittest.TestCase):
         empty = get_manufacturer_products(
             "др еткер", page=1, per_page=12, sub_category=["Непостоечка::Поткатегорија"]
         )
+        self.assertEqual(empty["total"], 0)
+        self.assertEqual(empty["data"], [])
+
+    def test_manufacturer_market_filter_parity(self):
+        unfiltered = get_manufacturer_products("др еткер", page=1, per_page=12)
+        mfr_name = unfiltered["manufacturer"]["name"]
+        markets = ["reptil", "vero"]
+
+        filtered = get_manufacturer_products("др еткер", page=1, per_page=36, market=markets)
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM manufacturers m
+                JOIN groups g ON g.manufacturer_id = m.id
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE m.canonical_name = %s
+                  AND p.market = ANY(%s)
+                """,
+                (mfr_name, markets),
+            )
+            expected_market_only = cur.fetchone()[0]
+
+        self.assertEqual(filtered["total"], expected_market_only)
+        self.assertEqual(filtered["manufacturer"]["groups"], unfiltered["manufacturer"]["groups"])
+        for row in filtered["data"]:
+            self.assertEqual(set(row.keys()), EXPECTED_GROUP_KEYS)
+            row_markets = {p["market"] for p in row["products"]}
+            self.assertTrue(row_markets & set(markets))
+
+        # Combined subcategory + market filter
+        first_sub = unfiltered["subcategories"][0]
+        sub_key = f"{first_sub['main_category']}::{first_sub['sub_category']}"
+        combined = get_manufacturer_products(
+            "др еткер", page=1, per_page=36, sub_category=[sub_key], market=markets
+        )
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM manufacturers m
+                JOIN groups g ON g.manufacturer_id = m.id
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE m.canonical_name = %s
+                  AND g.main_category = %s
+                  AND g.sub_category = %s
+                  AND p.market = ANY(%s)
+                """,
+                (mfr_name, first_sub["main_category"], first_sub["sub_category"], markets),
+            )
+            expected_combined = cur.fetchone()[0]
+
+        self.assertEqual(combined["total"], expected_combined)
+        for row in combined["data"]:
+            self.assertEqual(row["main_category"], first_sub["main_category"])
+            self.assertEqual(row["sub_category"], first_sub["sub_category"])
+            row_markets = {p["market"] for p in row["products"]}
+            self.assertTrue(row_markets & set(markets))
+
+        # Non-matching market yields 0 rows without error
+        empty = get_manufacturer_products("др еткер", page=1, per_page=12, market=["__no_such_market__"])
         self.assertEqual(empty["total"], 0)
         self.assertEqual(empty["data"], [])
 
@@ -192,6 +256,9 @@ class ApiReadModelTests(unittest.TestCase):
         detail = get_product_detail(str(first["group_id"]))
         self.assertEqual(str(detail["group"]["group_id"]), str(first["group_id"]))
         self.assertGreater(detail["stats"]["in_stock"], 0)
+        for offer in detail["offers"]:
+            self.assertIn("market_last_updated", offer)
+            self.assertIsNotNone(offer["market_last_updated"])
 
     def test_concurrent_refresh_read_views(self):
         refreshed = refresh_read_views(self.conn, concurrently=True)

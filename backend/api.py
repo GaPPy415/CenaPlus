@@ -165,6 +165,48 @@ MANUFACTURER_GROUPS_SUBCATEGORY_SQL = """
     LIMIT %s OFFSET %s
 """
 
+MANUFACTURER_GROUPS_MARKET_SQL = """
+    SELECT group_id,
+           group_name,
+           main_category,
+           sub_category,
+           products
+    FROM grouped_products
+    WHERE manufacturer_id = %s
+      AND markets && %s::text[]
+    ORDER BY group_name
+    LIMIT %s OFFSET %s
+"""
+
+MANUFACTURER_COUNT_MARKET_SQL = """
+    SELECT COUNT(*)
+    FROM grouped_products
+    WHERE manufacturer_id = %s
+      AND markets && %s::text[]
+"""
+
+MANUFACTURER_GROUPS_SUBCATEGORY_MARKET_SQL = """
+    SELECT group_id,
+           group_name,
+           main_category,
+           sub_category,
+           products
+    FROM grouped_products
+    WHERE manufacturer_id = %s
+      AND (main_category || '::' || sub_category) = ANY(%s::text[])
+      AND markets && %s::text[]
+    ORDER BY group_name
+    LIMIT %s OFFSET %s
+"""
+
+MANUFACTURER_COUNT_SUBCATEGORY_MARKET_SQL = """
+    SELECT COUNT(*)
+    FROM grouped_products
+    WHERE manufacturer_id = %s
+      AND (main_category || '::' || sub_category) = ANY(%s::text[])
+      AND markets && %s::text[]
+"""
+
 RESOLVE_MANUFACTURER_SQL = """
     WITH RECURSIVE seed AS (
         SELECT m.id, m.canonical_name, m.display_name, m.merged_into, 0 AS priority
@@ -199,6 +241,7 @@ RESOLVE_MANUFACTURER_SQL = """
            COALESCE(ms.groups, 0) AS groups,
            COALESCE(ms.categories, 0) AS categories,
            COALESCE(ms.markets, 0) AS markets,
+           ms.last_updated,
            COALESCE(ms.subcategories, '[]'::jsonb) AS subcategories
     FROM resolved r
     LEFT JOIN manufacturer_stats ms ON ms.manufacturer_id = r.id
@@ -240,6 +283,7 @@ def get_manufacturer_products(
     page: int = Query(1, ge=1),
     per_page: PerPage = Query(PerPage.twelve),
     sub_category: list[str] = Query(None),
+    market: list[str] = Query(None),
 ):
     """All grouped products of one manufacturer, across every category."""
     # `per_page` arrives as the enum through FastAPI, but plain ints are accepted
@@ -248,6 +292,8 @@ def get_manufacturer_products(
     needle = normalize_string(manufacturer_name) or manufacturer_name.strip().lower()
     raw_subs = sub_category if isinstance(sub_category, (list, tuple)) else []
     active_sub_filters = [s for s in raw_subs if (s or "").strip()]
+    raw_markets = market if isinstance(market, (list, tuple)) else []
+    active_markets = [m for m in raw_markets if (m or "").strip()]
 
     with get_cursor() as cur:
         cur.execute(RESOLVE_MANUFACTURER_SQL, (needle, needle))
@@ -258,7 +304,25 @@ def get_manufacturer_products(
         subcategories = manufacturer["subcategories"] or []
         offset = per_page_value * (page - 1)
 
-        if active_sub_filters:
+        if active_sub_filters and active_markets:
+            matched_keys, sub_total = _match_manufacturer_subcategories(
+                subcategories, active_sub_filters
+            )
+            if sub_total > 0:
+                cur.execute(
+                    MANUFACTURER_GROUPS_SUBCATEGORY_MARKET_SQL,
+                    (manufacturer["id"], matched_keys, active_markets, per_page_value, offset),
+                )
+                rows = cur.fetchall()
+                cur.execute(
+                    MANUFACTURER_COUNT_SUBCATEGORY_MARKET_SQL,
+                    (manufacturer["id"], matched_keys, active_markets),
+                )
+                total = cur.fetchone()["count"]
+            else:
+                total = 0
+                rows = []
+        elif active_sub_filters:
             matched_keys, total = _match_manufacturer_subcategories(
                 subcategories, active_sub_filters
             )
@@ -269,6 +333,21 @@ def get_manufacturer_products(
                 )
                 rows = cur.fetchall()
             else:
+                rows = []
+        elif active_markets:
+            if manufacturer["groups"] > 0:
+                cur.execute(
+                    MANUFACTURER_GROUPS_MARKET_SQL,
+                    (manufacturer["id"], active_markets, per_page_value, offset),
+                )
+                rows = cur.fetchall()
+                cur.execute(
+                    MANUFACTURER_COUNT_MARKET_SQL,
+                    (manufacturer["id"], active_markets),
+                )
+                total = cur.fetchone()["count"]
+            else:
+                total = 0
                 rows = []
         else:
             total = manufacturer["groups"]
@@ -288,6 +367,7 @@ def get_manufacturer_products(
             "groups": manufacturer["groups"],
             "categories": manufacturer["categories"],
             "markets": manufacturer["markets"],
+            "last_updated": manufacturer["last_updated"],
         },
         "subcategories": subcategories,
         "total": total,
@@ -351,6 +431,23 @@ def get_product_detail(g_id: str = Query(..., description="Group id (uuid)")):
             ("%краток рок%", group_id),
         )
         offers = cur.fetchall()
+
+        # Newest scraped change per market = when that store's data was last refreshed.
+        markets = sorted({o["market"] for o in offers})
+        market_updates: dict = {}
+        if markets:
+            cur.execute(
+                """
+                SELECT m.market,
+                       (SELECT MAX(p.last_updated) FROM products p WHERE p.market = m.market)
+                           AS last_updated
+                FROM unnest(%s::text[]) AS m(market)
+                """,
+                (markets,),
+            )
+            market_updates = {r["market"]: r["last_updated"] for r in cur.fetchall()}
+        for o in offers:
+            o["market_last_updated"] = market_updates.get(o["market"])
 
     available = [o for o in offers if o["in_stock"]]
     prices = [o["price"] for o in available if o["price"] is not None]

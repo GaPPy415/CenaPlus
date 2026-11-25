@@ -41,6 +41,8 @@ export interface ProductOffer {
   image: string | null;
   link: string;
   last_updated: string | null;
+  /** Newest `last_updated` across all of this market's products (store data freshness). */
+  market_last_updated: string | null;
   kratok_rok: boolean;
 }
 
@@ -106,6 +108,7 @@ export interface ManufacturerListing {
     groups: number;
     categories: number;
     markets: number;
+    last_updated: string | null;
   };
   subcategories: ManufacturerSubCategory[];
   total: number;
@@ -118,11 +121,15 @@ export async function fetchManufacturer(
   manufacturerName: string,
   page = 1,
   perPage: 12 | 24 | 36 = 12,
-  subCategories: string[] = []
+  subCategories: string[] = [],
+  markets: string[] = []
 ): Promise<ManufacturerListing> {
   let url = `${API_BASE}/manufacturer?manufacturer_name=${encodeURIComponent(manufacturerName)}&page=${page}&per_page=${perPage}`;
   for (const sc of subCategories) {
     url += `&sub_category=${encodeURIComponent(sc)}`;
+  }
+  for (const m of markets) {
+    url += `&market=${encodeURIComponent(m)}`;
   }
   const res = await fetch(url);
   if (res.status === 404) throw new Error("Manufacturer not found");

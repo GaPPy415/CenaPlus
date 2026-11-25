@@ -14,6 +14,12 @@ import {
 
 import ProductCard from "@/components/ProductCard";
 import Pagination from "@/components/Pagination";
+import {
+  MarketFilterActivePills,
+  MarketFilterMobileButton,
+  MarketFilterMobileDrawer,
+  MarketFilterSidebar,
+} from "@/components/MarketFilter";
 import { fetchManufacturer } from "@/lib/api";
 
 const PER_PAGE_OPTIONS = [12, 24, 36] as const;
@@ -21,9 +27,20 @@ const PER_PAGE_OPTIONS = [12, 24, 36] as const;
 const subCategoryKey = (mainCategory: string, subCategory: string) =>
   `${mainCategory}::${subCategory}`;
 
+const formatDateTime = (value: string | null) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+};
+
 const ManufacturerView = () => {
   const [params, setParams] = useSearchParams();
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [mobileMarketsOpen, setMobileMarketsOpen] = useState(false);
   const name = params.get("manufacturer_name") ?? "";
   const page = Math.max(1, parseInt(params.get("page") ?? "1", 10) || 1);
   const perPageParam = parseInt(params.get("per_page") ?? "12", 10);
@@ -31,9 +48,11 @@ const ManufacturerView = () => {
     ? (perPageParam as 12 | 24 | 36)
     : 12;
   const selectedSubs = params.getAll("sub").filter(Boolean);
+  const selectedMarkets = params.getAll("market").filter(Boolean);
 
   useEffect(() => {
     setFiltersOpen(false);
+    setMobileMarketsOpen(false);
   }, [name]);
 
   const updateParams = (patch: Record<string, string>, scrollToTop = false) => {
@@ -60,9 +79,28 @@ const ManufacturerView = () => {
     setSubCategories(nextSubs);
   };
 
+  const setMarkets = (nextMarkets: string[]) => {
+    const next = new URLSearchParams(params);
+    next.delete("market");
+    nextMarkets.forEach((m) => next.append("market", m));
+    next.set("page", "1");
+    setParams(next);
+  };
+
+  const toggleMarket = (key: string) => {
+    const nextMarkets = selectedMarkets.includes(key)
+      ? selectedMarkets.filter((m) => m !== key)
+      : [...selectedMarkets, key];
+    setMarkets(nextMarkets);
+  };
+
+  const resetMarkets = () => {
+    setMarkets([]);
+  };
+
   const { data, isLoading, isError, isPlaceholderData, refetch } = useQuery({
-    queryKey: ["manufacturer", name, page, perPage, selectedSubs],
-    queryFn: () => fetchManufacturer(name, page, perPage, selectedSubs),
+    queryKey: ["manufacturer", name, page, perPage, selectedSubs, selectedMarkets],
+    queryFn: () => fetchManufacturer(name, page, perPage, selectedSubs, selectedMarkets),
     enabled: Boolean(name),
     retry: 1,
     // Keep previous response mounted across filter/page changes for the SAME brand
@@ -71,7 +109,7 @@ const ManufacturerView = () => {
       previousQuery?.queryKey?.[1] === name ? previousData : undefined,
   });
 
-  const requestedFilterKey = `${name}|${page}|${perPage}|${selectedSubs.join(",")}`;
+  const requestedFilterKey = `${name}|${page}|${perPage}|${selectedSubs.join(",")}|${selectedMarkets.join(",")}`;
   const renderedFilterKeyRef = useRef(requestedFilterKey);
   if (!isPlaceholderData && data) {
     renderedFilterKeyRef.current = requestedFilterKey;
@@ -124,9 +162,19 @@ const ManufacturerView = () => {
   }
 
   return (
-    <main className="container mx-auto max-w-6xl px-4 py-8">
-      {/* Breadcrumb */}
-      <nav aria-label="Патека" className="mb-5 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+    <main className="w-full py-8">
+      <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-6 px-4 lg:max-w-7xl lg:grid-cols-[13.5rem_minmax(0,1fr)] min-[1440px]:max-w-none min-[1440px]:grid-cols-[1fr_minmax(0,62rem)_1fr] min-[1440px]:gap-0 min-[1440px]:px-0 min-[1680px]:grid-cols-[1fr_minmax(0,72rem)_1fr]">
+        {/* Desktop left sticky sidebar: centered in the left gutter on >=1440px */}
+        <MarketFilterSidebar
+          selectedMarkets={selectedMarkets}
+          onToggleMarket={toggleMarket}
+          onResetMarkets={resetMarkets}
+        />
+
+        {/* Main centered content column */}
+        <div className="min-w-0 min-[1440px]:col-start-2 min-[1440px]:px-4">
+          {/* Breadcrumb */}
+          <nav aria-label="Патека" className="mb-5 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
         <Link to="/" className="hover:text-foreground hover:underline">
           Дома
         </Link>
@@ -155,7 +203,7 @@ const ManufacturerView = () => {
         </p>
 
         {data ? (
-          <dl className="mt-4 grid grid-cols-3 gap-3 sm:max-w-md">
+          <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:max-w-2xl">
             <div>
               <dt className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Boxes className="h-3 w-3" aria-hidden="true" /> Производи
@@ -180,10 +228,18 @@ const ManufacturerView = () => {
                 {data.manufacturer.markets}
               </dd>
             </div>
+            <div>
+              <dt className="flex items-center gap-1 text-xs text-muted-foreground">
+                <RefreshCw className="h-3 w-3" aria-hidden="true" /> Последно ажурирање
+              </dt>
+              <dd className="text-base font-bold tabular-nums text-foreground sm:text-lg">
+                {formatDateTime(data.manufacturer.last_updated) ?? "—"}
+              </dd>
+            </div>
           </dl>
         ) : isLoading ? (
-          <div className="mt-4 grid grid-cols-3 gap-3 sm:max-w-md" aria-hidden="true">
-            {Array.from({ length: 3 }).map((_, idx) => (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:max-w-2xl" aria-hidden="true">
+            {Array.from({ length: 4 }).map((_, idx) => (
               <div key={idx} className="space-y-1.5">
                 <div className="h-3.5 w-16 animate-pulse rounded bg-muted" />
                 <div className="h-6 w-10 animate-pulse rounded bg-muted" />
@@ -193,8 +249,8 @@ const ManufacturerView = () => {
         ) : null}
       </header>
 
-      {/* Controls toolbar: progressive-disclosure subcategory toggle + count + per-page */}
-      {data && (data.total > 0 || selectedSubs.length > 0 || hasSubFilter) && (
+      {/* Controls toolbar: progressive-disclosure subcategory + mobile market toggles + count + per-page */}
+      {data && (data.total > 0 || selectedSubs.length > 0 || selectedMarkets.length > 0 || hasSubFilter || data.manufacturer.groups > 0) && (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             {hasSubFilter && (
@@ -229,8 +285,15 @@ const ManufacturerView = () => {
               </button>
             )}
 
+            <MarketFilterMobileButton
+              open={mobileMarketsOpen}
+              selectedCount={selectedMarkets.length}
+              panelId="manufacturer-mobile-markets-panel"
+              onToggle={() => setMobileMarketsOpen((open) => !open)}
+            />
+
             <p className="text-sm text-muted-foreground tabular-nums">
-              {selectedSubs.length > 0
+              {selectedSubs.length > 0 || selectedMarkets.length > 0
                 ? `Прикажани ${data.total} од ${data.manufacturer.groups} производи`
                 : `${data.total} производи`}
             </p>
@@ -309,7 +372,7 @@ const ManufacturerView = () => {
             >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-medium text-muted-foreground">
-                  Изберете една или повеќе поткатегории за да ги стесните резултатите
+                  Изберете една или повеќе поткатегории за да ги филтрирате резултатите
                 </p>
                 {selectedSubs.length > 0 && (
                   <button
@@ -384,9 +447,28 @@ const ManufacturerView = () => {
         </div>
       )}
 
+      {/* Mobile/tablet active market filter pills when drawer is collapsed */}
+      <MarketFilterActivePills
+        open={mobileMarketsOpen}
+        selectedMarkets={selectedMarkets}
+        onToggleMarket={toggleMarket}
+        onResetMarkets={resetMarkets}
+        className="mt-3"
+      />
+
+      {/* Mobile/tablet collapsible markets drawer */}
+      <MarketFilterMobileDrawer
+        open={mobileMarketsOpen}
+        panelId="manufacturer-mobile-markets-panel"
+        selectedMarkets={selectedMarkets}
+        onToggleMarket={toggleMarket}
+        onResetMarkets={resetMarkets}
+        openMarginClass="mt-3"
+      />
+
       {/* Loading skeleton (initial brand load only) */}
       {isLoading && !data && (
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
           <span className="sr-only">Се вчитуваат производите…</span>
           {Array.from({ length: 6 }).map((_, index) => (
             <div key={index} className="h-80 animate-pulse rounded-xl border border-border bg-muted/50" />
@@ -416,13 +498,15 @@ const ManufacturerView = () => {
         <>
           {data.data.length === 0 ? (
             <p className="mt-10 rounded-lg border border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-              Нема производи од овој производител во моментов.
+              {selectedMarkets.length > 0 || selectedSubs.length > 0
+                ? "Нема производи за избраните филтри од овој производител."
+                : "Нема производи од овој производител во моментов."}
             </p>
           ) : (
             <div
               key={gridTransitionKey}
               aria-busy={isPlaceholderData}
-              className={`mt-4 grid grid-cols-1 gap-4 transition-opacity duration-150 motion-reduce:animate-none motion-reduce:transition-none sm:grid-cols-2 lg:grid-cols-3 ${
+              className={`mt-4 grid grid-cols-1 gap-4 transition-opacity duration-150 motion-reduce:animate-none motion-reduce:transition-none sm:grid-cols-2 xl:grid-cols-3 ${
                 isPlaceholderData ? "opacity-65" : "animate-grid-swap opacity-100"
               }`}
             >
@@ -439,6 +523,8 @@ const ManufacturerView = () => {
           />
         </>
       )}
+        </div>
+      </div>
     </main>
   );
 };
