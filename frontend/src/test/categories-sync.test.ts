@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { CATEGORIES } from "@/lib/categories";
-import categoriesJson from "../../shared/categories.json";
+import categoriesJson from "../../../shared/categories.json";
 
 describe("categories-sync", () => {
   it("TypeScript CATEGORIES matches shared JSON exactly", () => {

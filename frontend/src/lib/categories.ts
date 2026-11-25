@@ -1,4 +1,4 @@
-import categoriesJson from "../../shared/categories.json";
+import categoriesJson from "../../../shared/categories.json";
 export const CATEGORIES: Record<string, string[]> = categoriesJson;
 
 export const CATEGORY_ICONS: Record<string, string> = {

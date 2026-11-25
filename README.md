@@ -26,7 +26,7 @@
 |-------|-------------|
 | **Frontend** | React 18, TypeScript, Vite, TanStack React Query, shadcn/ui, Tailwind CSS |
 | **Backend** | Python 3.12, FastAPI, psycopg2, PostgreSQL + pgvector |
-| **AI/ML** | Gemini 3.1 Flash Lite (categorization + feature extraction), Gemini Embedding 001 (768-dim fallback vectors) |
+| **AI/ML** | Gemini 3.1 Flash Lite (categorization + feature extraction), local Ollama `bge-m3` (cached Layer 5 grouping vectors) |
 | **Scrapers** | BeautifulSoup, aiohttp, requests, pandas |
 | **Deployment** | Docker Compose, Nginx, python:3.12-alpine, oven/bun |
 
@@ -89,6 +89,7 @@
 
 #### Frontend
 ```bash
+cd frontend
 bun install        # or npm install
 bun run dev        # Vite dev server on port 8080 (proxies /api → 127.0.0.1:8000)
 bun run build      # production build (Vite only, no typecheck)
@@ -103,30 +104,29 @@ pip install -r requirements-api.txt
 uvicorn backend.api:app --reload
 ```
 
-The API connects to PostgreSQL at import time and needs a reachable database. The Gemini client is
-created lazily, so `/search` and product pages work without `GOOGLE_API_KEY`; only the
-`/search/semantic` fallback and the pipeline stages need it.
+The API connects to PostgreSQL at import time and needs a reachable database. It requires no
+`GOOGLE_API_KEY` (search uses PostgreSQL `pg_trgm`); `GOOGLE_API_KEY` is only needed by the
+categorization and feature-extraction pipeline stages.
 
 ---
 
 ## Data Pipeline
 
-The pipeline runs in five sequential stages. Each can be run independently or all at once:
+The pipeline runs in four sequential stages. Each can be run independently or all at once:
 
 ```bash
-# Full pipeline (script mode — `-m backend.data.run_pipeline` does not work)
+# Full pipeline
 python backend/data/run_pipeline.py
 
 # Individual stages
 python -m backend.data.run_scrapers              # 1. Scrape products
 python -m backend.data.categorize_products        # 2. Categorize with Gemini
 python -m backend.data.extract_features           # 3. Manufacturer / name / quantity features
-python -m backend.data.embed_products             # 4. Embeddings (search fallback)
-python -m backend.data.group_products --apply     # 5. Deterministic grouping (rebuilds `groups`)
+python -m backend.data.group_products --apply     # 4. 5-layer non-LLM grouping (rebuilds `groups`)
 ```
 
-Each stage is safe to re-run and only picks up rows that still need work (missing category, features
-or embedding), so the stages must run in order. Grouping is the exception: `--apply` truncates
+Each stage is safe to re-run and only picks up rows that still need work (missing category or
+features), so the stages must run in order. Grouping is the exception: `--apply` truncates
 `groups` and rebuilds every `group_id`, so run it after extraction, not concurrently with it.
 
 **Scraper options:**
@@ -144,7 +144,6 @@ python -m backend.data.run_scrapers --dry-run      # list scrapers without runni
 | `GET` | `/health` | Health check (`{"status": "healthy"}`) |
 | `GET` | `/categories` | Returns the full category taxonomy |
 | `GET` | `/search?q=...` | Fuzzy search (pg_trgm, similarity ≥ 0.8, ordered by similarity) |
-| `GET` | `/search/semantic?q=...` | Embedding fallback (≥ 0.80 cosine, needs `GOOGLE_API_KEY`) |
 | `GET` | `/product?g_id=...` | Full product detail: metadata, price stats, every market offer (in and out of stock) |
 | `GET` | `/manufacturer?manufacturer_name=...` | Every grouped product of one manufacturer, across all categories (alias/`merged_into` aware) |
 | `GET` | `/{main_category}/{sub_category}` | Paginated grouped products with optional market filter |
@@ -164,35 +163,37 @@ python -m backend.data.run_scrapers --dry-run      # list scrapers without runni
 ```
 CenaPlus/
 ├── backend/
+│   ├── Dockerfile                    # API container (python:3.12-alpine)
 │   ├── api.py                        # FastAPI server
-│   └── data/
-│       ├── constants.py              # Category taxonomy (loaded from shared/categories.json)
-│       ├── db_utils.py               # PostgreSQL helpers
-│       ├── categorize_products.py    # Gemini categorization pipeline
-│       ├── extract_features.py       # Gemini manufacturer/name/quantity extraction
-│       ├── embed_products.py         # Embedding generation (search fallback)
-│       ├── group_products.py         # Deterministic cross-market grouping
-│       ├── grouping_rules.py         # Variant/normalisation rules for grouping
-│       ├── manufacturer_merges.py    # Alias/merge tool for manufacturers
-│       ├── text_utils.py             # Shared utilities (normalize, embed client)
-│       ├── RateLimiter.py            # Async rate limiter for Gemini API
-│       ├── run_scrapers.py           # Scraper orchestrator
-│       ├── run_pipeline.py           # Full pipeline runner
-│       └── scrapers/                 # Market-specific scrapers
-├── backend/tests/                    # stdlib unittest suite
+│   ├── data/
+│   │   ├── constants.py              # Category taxonomy (loaded from shared/categories.json)
+│   │   ├── db_utils.py               # PostgreSQL helpers
+│   │   ├── categorize_products.py    # Gemini categorization pipeline
+│   │   ├── extract_features.py       # Gemini manufacturer/name/quantity extraction
+│   │   ├── group_products.py         # 5-layer non-LLM cross-market grouping
+│   │   ├── grouping_rules.py         # Normalization, safety specs, and IR matching rules
+│   │   ├── local_embeddings.py       # Local Ollama bge-m3 embedding cache (Layer 5)
+│   │   ├── text_utils.py             # Shared text normalization helpers
+│   │   ├── RateLimiter.py            # Async rate limiter for Gemini API
+│   │   ├── run_scrapers.py           # Scraper orchestrator
+│   │   ├── run_pipeline.py           # Full pipeline runner
+│   │   ├── tools/                    # Maintenance CLIs (aliases, manufacturer merges, keys)
+│   │   └── scrapers/                 # Market-specific scrapers
+│   └── tests/                        # stdlib unittest suite
+├── frontend/
+│   ├── Dockerfile                    # Multi-stage Bun build + Nginx container
+│   ├── nginx.conf                    # Reverse proxy + rate limiting
+│   ├── src/
+│   │   ├── pages/                    # Index, SearchResults, ProductDetail, ManufacturerView, NotFound
+│   │   ├── components/               # Header, ProductCard, SubCategoryView, Pagination, CartSidebar, etc.
+│   │   ├── context/                  # CartContext (localStorage-backed cart)
+│   │   ├── lib/                      # API client, categories, utilities
+│   │   └── hooks/                    # Custom React hooks
+│   └── public/                       # Static assets
 ├── shared/
 │   └── categories.json               # Single source of truth for the taxonomy
-├── src/
-│   ├── pages/                        # Index, SearchResults, ProductDetail, ManufacturerView, NotFound
-│   ├── components/                   # Header, ProductCard, SubCategoryView, Pagination, CartSidebar, etc.
-│   ├── context/                      # CartContext (localStorage-backed cart)
-│   ├── lib/                          # API client, categories, utilities
-│   └── hooks/                        # Custom React hooks
 ├── init/                             # 00_schema.sql - complete DB schema (tables, indexes, trigger, view)
 ├── docker-compose.yml
-├── Dockerfile.backend
-├── Dockerfile.frontend
-├── nginx.conf
 ├── requirements.txt                  # Full pipeline dependencies
 └── requirements-api.txt              # API-only dependencies
 ```
@@ -201,13 +202,12 @@ CenaPlus/
 
 ## Database Schema
 
-- **`products`** — all scraped products (name, price, market, embeddings, categories, extracted features, group assignment)
-- **`groups`** — deterministic product groups (manufacturer + name + size + variant), one row per product family
+- **`products`** — all scraped products (name, price, market, categories, extracted features, group assignment)
+- **`groups`** — cross-market product groups, one row per product family
 - **`manufacturers` / `manufacturer_aliases`** — canonical brand names, aliases and `merged_into` chains
+- **`product_name_token_aliases`** — cross-market synonym/abbreviation aliases for grouping
+- **`bge_text_embeddings`** — cached 1024-dim local `bge-m3` vectors for Layer 5 grouping
 - **`grouped_products`** (view) — joins groups with their in-stock products, ordered by price
-
-Vectors use pgvector's `vector(768)` type with the `<=>` (cosine distance) operator and back the
-`/search/semantic` fallback; grouping itself is deterministic and does not use them.
 
 > The complete schema is `init/00_schema.sql` — extensions, all tables, constraints, indexes, the
 > timestamp trigger and the `grouped_products` view. A fresh Docker volume creates it automatically;
