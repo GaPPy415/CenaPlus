@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -36,11 +36,13 @@ const ManufacturerView = () => {
     setFiltersOpen(false);
   }, [name]);
 
-  const updateParams = (patch: Record<string, string>) => {
+  const updateParams = (patch: Record<string, string>, scrollToTop = false) => {
     const next = new URLSearchParams(params);
     Object.entries(patch).forEach(([key, value]) => next.set(key, value));
     setParams(next);
-    window.scrollTo({ top: 0 });
+    if (scrollToTop) {
+      window.scrollTo({ top: 0 });
+    }
   };
 
   const setSubCategories = (nextSubs: string[]) => {
@@ -49,7 +51,6 @@ const ManufacturerView = () => {
     nextSubs.forEach((sc) => next.append("sub", sc));
     next.set("page", "1");
     setParams(next);
-    window.scrollTo({ top: 0 });
   };
 
   const toggleSubCategory = (key: string) => {
@@ -59,12 +60,23 @@ const ManufacturerView = () => {
     setSubCategories(nextSubs);
   };
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, isPlaceholderData, refetch } = useQuery({
     queryKey: ["manufacturer", name, page, perPage, selectedSubs],
     queryFn: () => fetchManufacturer(name, page, perPage, selectedSubs),
     enabled: Boolean(name),
     retry: 1,
+    // Keep previous response mounted across filter/page changes for the SAME brand
+    // so header stats, display_name script, and filter drawer never flicker or collapse.
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey?.[1] === name ? previousData : undefined,
   });
+
+  const requestedFilterKey = `${name}|${page}|${perPage}|${selectedSubs.join(",")}`;
+  const renderedFilterKeyRef = useRef(requestedFilterKey);
+  if (!isPlaceholderData && data) {
+    renderedFilterKeyRef.current = requestedFilterKey;
+  }
+  const gridTransitionKey = renderedFilterKeyRef.current;
 
   // Disambiguate duplicate subcategory names (e.g. "Останато" across main categories)
   const duplicateSubNames = useMemo(() => {
@@ -128,14 +140,21 @@ const ManufacturerView = () => {
           <Store className="h-3.5 w-3.5" aria-hidden="true" />
           Производител
         </p>
-        <h1 className="mt-1 font-heading text-2xl font-extrabold capitalize text-foreground sm:text-3xl">
-          {data?.manufacturer.display_name ?? name}
-        </h1>
+        {isLoading && !data ? (
+          <div
+            className="mt-1.5 h-8 w-48 animate-pulse rounded-md bg-muted sm:h-9"
+            aria-hidden="true"
+          />
+        ) : (
+          <h1 className="mt-1 font-heading text-2xl font-extrabold capitalize text-foreground sm:text-3xl">
+            {data?.manufacturer.display_name ?? name}
+          </h1>
+        )}
         <p className="mt-1 text-sm text-muted-foreground">
           Сите производи од овој производител, низ сите категории
         </p>
 
-        {data && (
+        {data ? (
           <dl className="mt-4 grid grid-cols-3 gap-3 sm:max-w-md">
             <div>
               <dt className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -162,7 +181,16 @@ const ManufacturerView = () => {
               </dd>
             </div>
           </dl>
-        )}
+        ) : isLoading ? (
+          <div className="mt-4 grid grid-cols-3 gap-3 sm:max-w-md" aria-hidden="true">
+            {Array.from({ length: 3 }).map((_, idx) => (
+              <div key={idx} className="space-y-1.5">
+                <div className="h-3.5 w-16 animate-pulse rounded bg-muted" />
+                <div className="h-6 w-10 animate-pulse rounded bg-muted" />
+              </div>
+            ))}
+          </div>
+        ) : null}
       </header>
 
       {/* Controls toolbar: progressive-disclosure subcategory toggle + count + per-page */}
@@ -356,8 +384,8 @@ const ManufacturerView = () => {
         </div>
       )}
 
-      {/* Loading skeleton */}
-      {isLoading && (
+      {/* Loading skeleton (initial brand load only) */}
+      {isLoading && !data && (
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
           <span className="sr-only">Се вчитуваат производите…</span>
           {Array.from({ length: 6 }).map((_, index) => (
@@ -367,7 +395,7 @@ const ManufacturerView = () => {
       )}
 
       {/* Error */}
-      {isError && (
+      {isError && !data && (
         <div className="mt-10 text-center">
           <p className="font-medium text-destructive">Не можевме да ги вчитаме производите</p>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -391,7 +419,13 @@ const ManufacturerView = () => {
               Нема производи од овој производител во моментов.
             </p>
           ) : (
-            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div
+              key={gridTransitionKey}
+              aria-busy={isPlaceholderData}
+              className={`mt-4 grid grid-cols-1 gap-4 transition-opacity duration-150 motion-reduce:animate-none motion-reduce:transition-none sm:grid-cols-2 lg:grid-cols-3 ${
+                isPlaceholderData ? "opacity-65" : "animate-grid-swap opacity-100"
+              }`}
+            >
               {data.data.map((group) => (
                 <ProductCard key={group.group_id} group={group} showCategory />
               ))}
@@ -401,7 +435,7 @@ const ManufacturerView = () => {
           <Pagination
             page={page}
             totalPages={totalPages}
-            onPageChange={(next) => updateParams({ page: String(next) })}
+            onPageChange={(next) => updateParams({ page: String(next) }, true)}
           />
         </>
       )}

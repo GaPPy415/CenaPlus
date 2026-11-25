@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { MARKET_INFO } from "@/lib/categories";
 import type { GroupedProduct } from "@/lib/api";
-import { ArrowRight, ExternalLink, ImageOff, Minus, Plus, ShoppingCart } from "lucide-react";
+import { ArrowRight, ChevronRight, ExternalLink, ImageOff, Minus, Plus, ShoppingCart } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 
 interface ProductCardProps {
@@ -41,14 +41,34 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
 
       {/* Name -> product page */}
       <div className="px-4 pb-2 pt-3">
-        {showCategory && group.main_category && (
-          <span className="mb-1 inline-block rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-            {group.main_category}
-          </span>
+        {showCategory && (group.main_category || group.sub_category) && (
+          <div className="mb-1.5 block">
+            <span
+              title={
+                group.main_category && group.sub_category
+                  ? `${group.main_category} → ${group.sub_category}`
+                  : group.main_category || group.sub_category
+              }
+              className="inline-flex max-w-full items-center gap-1 rounded-md bg-muted/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              {group.main_category && (
+                <span className="truncate">{group.main_category}</span>
+              )}
+              {group.main_category && group.sub_category && (
+                <ChevronRight
+                  className="h-3 w-3 shrink-0 text-muted-foreground/60"
+                  aria-hidden="true"
+                />
+              )}
+              {group.sub_category && (
+                <span className="truncate text-foreground/80">{group.sub_category}</span>
+              )}
+            </span>
+          </div>
         )}
         <Link
           to={detailHref}
-          className="group/link inline-flex items-start gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group/link block rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <h3 className="font-heading text-sm font-semibold leading-tight text-card-foreground line-clamp-2 group-hover/link:underline">
             {group.group_name}

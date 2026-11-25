@@ -37,5 +37,5 @@ export const MARKET_INFO: Record<string, { name: string; color: string }> = {
   zur: { name: "Зур", color: "hsl(var(--market-zur))" },
   elida: { name: "Елида", color: "hsl(var(--market-elida))" },
   spar: { name: "SPAR", color: "hsl(var(--market-spar))" },
-  kipper: { name: "Киппер", color: "hsl(var(--market-kipper))" },
+  kipper: { name: "Kipper", color: "hsl(var(--market-kipper))" },
 };
