@@ -100,7 +100,7 @@ bun run lint       # ESLint
 
 #### Backend API
 ```bash
-pip install -r requirements-api.txt
+pip install -r backend/requirements.txt
 uvicorn backend.api:app --reload
 ```
 
@@ -164,6 +164,7 @@ python -m backend.data.run_scrapers --dry-run      # list scrapers without runni
 CenaPlus/
 ├── backend/
 │   ├── Dockerfile                    # API container (python:3.12-alpine)
+│   ├── requirements.txt              # API-only dependencies (Docker backend image)
 │   ├── api.py                        # FastAPI server
 │   ├── data/
 │   │   ├── constants.py              # Category taxonomy (loaded from shared/categories.json)
@@ -178,6 +179,7 @@ CenaPlus/
 │   │   ├── run_scrapers.py           # Scraper orchestrator
 │   │   ├── run_pipeline.py           # Full pipeline runner
 │   │   ├── tools/                    # Maintenance CLIs (aliases, manufacturer merges, keys)
+│   │   ├── requirements-data.txt     # Pinned pipeline & scraper dependencies
 │   │   └── scrapers/                 # Market-specific scrapers
 │   └── tests/                        # stdlib unittest suite
 ├── frontend/
@@ -193,9 +195,7 @@ CenaPlus/
 ├── shared/
 │   └── categories.json               # Single source of truth for the taxonomy
 ├── init/                             # 00_schema.sql - complete DB schema (tables, indexes, trigger, view)
-├── docker-compose.yml
-├── requirements.txt                  # Full pipeline dependencies
-└── requirements-api.txt              # API-only dependencies
+└── docker-compose.yml
 ```
 
 ---

@@ -6,9 +6,9 @@ RUN addgroup -g 1001 -S appgroup && \
 
 WORKDIR /app
 
-COPY requirements-api.txt /app/
+COPY backend/requirements.txt /app/
 
-RUN pip install --no-cache-dir -r requirements-api.txt && \
+RUN pip install --no-cache-dir -r requirements.txt && \
     find /usr/local/lib/python3.12 -name "*.pyc" -delete && \
     find /usr/local/lib/python3.12 -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 

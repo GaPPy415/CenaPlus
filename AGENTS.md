@@ -150,8 +150,8 @@ tokens in `frontend/tailwind.config.ts`.
 Host-side Docker map: Postgres on `localhost:5454` (`POSTGRES_PORT`), API on `:8000` from uvicorn,
 frontend on `:8080`.
 
-Dependency files: `requirements.txt` (full), `requirements-api.txt` (what the backend image installs),
-`backend/data/requirements-data.txt` (pinned pipeline deps, incl. `pdfplumber`/`lxml`).
+Dependency files: `backend/requirements.txt` (what the backend Docker image installs),
+`backend/data/requirements-data.txt` (pinned pipeline/scraper deps, incl. `pdfplumber`/`lxml`).
 
 ## Known state
 

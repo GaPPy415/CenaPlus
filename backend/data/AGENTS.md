@@ -68,6 +68,5 @@ python -m backend.data.tools.product_name_aliases --all --apply
 
 | File | Purpose | Environment |
 |------|---------|-------------|
-| `requirements.txt` (repo root) | Full dependencies: pipeline + API + dev | Local development |
-| `requirements-api.txt` (repo root) | Minimal API-only deps (`fastapi`, `uvicorn`, `psycopg2-binary`, `pydantic`, `python-dotenv`, `cyrtranslit`) | Docker backend service |
-| `backend/data/requirements-data.txt` | Pinned pipeline deps (`google-genai`, `numpy`, `requests`, `pdfplumber`, `lxml`, etc.) | Data pipeline runs |
+| `backend/requirements.txt` | Minimal API-only deps (`fastapi`, `uvicorn`, `psycopg2-binary`, `pydantic`, `python-dotenv`, `cyrtranslit`) | Docker backend service |
+| `backend/data/requirements-data.txt` | Pinned pipeline/scraper deps (`google-genai`, `numpy`, `requests`, `pandas`, `beautifulsoup4`, `pdfplumber`, `lxml`, etc.) | Data pipeline runs |
