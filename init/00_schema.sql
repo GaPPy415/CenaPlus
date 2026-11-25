@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS public.products (
     sub_category          text,
     confidence            double precision,
     market                text,
-    name_embedding        vector(768) DEFAULT NULL::vector,
     etl_loadtime          timestamp NOT NULL DEFAULT now(),
     categorized_at        timestamp,
     last_updated          timestamp NOT NULL DEFAULT now(),
@@ -108,7 +107,6 @@ CREATE TABLE IF NOT EXISTS public.groups (
     name                text NOT NULL,
     main_category       text,
     sub_category        text,
-    name_embedding      vector(768),
     clean_name          text,
     -- deterministic identity key (mirrors products)
     manufacturer_id     bigint,
@@ -169,19 +167,9 @@ CREATE TRIGGER products_set_timestamps_trg
 CREATE INDEX IF NOT EXISTS idx_products_name
     ON public.products USING btree (name);
 
--- semantic search / embeddings fallback
-CREATE INDEX IF NOT EXISTS idx_products_name_embedding
-    ON public.products USING hnsw (name_embedding vector_cosine_ops)
-    WITH (m = '16', ef_construction = '64');
-
--- legacy semantic grouping hot paths
+-- category listing hot path
 CREATE INDEX IF NOT EXISTS idx_groups_category
-    ON public.groups USING btree (main_category, sub_category)
-    WHERE name_embedding IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_products_grouping
-    ON public.products USING btree (main_category, sub_category)
-    WHERE group_id IS NULL AND name_embedding IS NOT NULL;
+    ON public.groups USING btree (main_category, sub_category);
 
 -- feature extraction work queue
 CREATE INDEX IF NOT EXISTS idx_products_features_pending
@@ -207,6 +195,32 @@ CREATE INDEX IF NOT EXISTS idx_groups_product_name_trgm
 CREATE INDEX IF NOT EXISTS idx_manufacturers_name_trgm
     ON public.manufacturers USING gin (canonical_name gin_trgm_ops);
 
+-- ---------------------------------------------------------------------------
+-- Reviewed token spelling aliases for product names (product_name_aliases.py)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.product_name_token_aliases (
+    manufacturer_id bigint NOT NULL REFERENCES public.manufacturers(id) ON DELETE CASCADE,
+    alias_token     text   NOT NULL,
+    canonical_token text   NOT NULL,
+    confidence      real   NOT NULL DEFAULT 1.0,
+    source          text   NOT NULL DEFAULT 'proposed',
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (manufacturer_id, alias_token),
+    CHECK (alias_token <> canonical_token)
+);
+
+-- ---------------------------------------------------------------------------
+-- Offline local embedding cache (Ollama bge-m3, 1024-dim) for Layer 5 grouping.
+-- Keyed on original-script product_name text so identical names across shops
+-- are embedded only once, leaving products.name_embedding (768-dim) untouched.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.bge_text_embeddings (
+    text_key   text PRIMARY KEY,
+    embedding  vector(1024) NOT NULL,
+    model      text NOT NULL DEFAULT 'bge-m3:latest',
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- NOTE: no unique index on the group natural key. Rule B (compatible variants)
 -- means a group's stored key is its representative's, and two distinct groups in
 -- the same block can legitimately share it (e.g. unbranded rows with no variant
@@ -221,7 +235,6 @@ SELECT g.id AS group_id,
        g.name AS group_name,
        g.main_category,
        g.sub_category,
-       g.name_embedding,
        json_agg(json_build_object(
            'product_id', p.id,
            'name', p.name,
