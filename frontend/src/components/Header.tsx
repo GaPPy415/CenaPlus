@@ -8,8 +8,9 @@ const Header = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const params = new URLSearchParams(location.search);
-  const mainCat = params.get("category");
-  const subCat = params.get("sub");
+  const isCategoryRoute = location.pathname === "/";
+  const mainCat = isCategoryRoute ? params.get("category") : null;
+  const subCat = isCategoryRoute ? params.get("sub") : null;
   const [searchValue, setSearchValue] = useState("");
 
   const handleSearch = (e: React.FormEvent) => {

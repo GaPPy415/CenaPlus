@@ -88,17 +88,6 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
               )}
             </div>
 
-            {selectedMarkets.length > 0 && (
-              <button
-                type="button"
-                onClick={resetMarkets}
-                className="mb-2.5 flex min-h-[34px] w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span>Ресетирај ({selectedMarkets.length})</span>
-              </button>
-            )}
-
             <div className="space-y-1">
               {ALL_MARKETS.map((key) => {
                 const info = MARKET_INFO[key];
@@ -133,6 +122,28 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
                   </button>
                 );
               })}
+            </div>
+
+            <div
+              aria-hidden={selectedMarkets.length === 0}
+              className={`grid transition-[grid-template-rows,opacity,margin] duration-150 ease-out motion-reduce:transition-none ${
+                selectedMarkets.length > 0
+                  ? "mt-3 grid-rows-[1fr] opacity-100"
+                  : "mt-0 grid-rows-[0fr] opacity-0"
+              }`}
+            >
+              <div className={`overflow-hidden ${selectedMarkets.length > 0 ? "visible" : "invisible"}`}>
+                <div className="border-t border-border pt-3">
+                  <button
+                    type="button"
+                    onClick={resetMarkets}
+                    className="flex min-h-[34px] w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>Ресетирај ({selectedMarkets.length})</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </aside>
