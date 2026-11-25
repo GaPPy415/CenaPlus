@@ -49,6 +49,7 @@ from backend.data.RateLimiter import (
     get_rate_limiter,
 )
 from backend.data.db_utils import connect_to_db
+from backend.data.grouping_rules import KEY_VERSION, compute_keys, variant_dict
 from backend.data.text_utils import normalize_string
 
 FEATURES_VERSION = 1
@@ -384,8 +385,34 @@ def parse_multipack_from_name(raw_name: str) -> tuple[Optional[float], Optional[
 # --------------------------------------------------------------------------
 # Manufacturer registry
 # --------------------------------------------------------------------------
+def _follow_merged_into(cur, manufacturer_id: int) -> int:
+    """Follow ``manufacturers.merged_into`` to the surviving canonical manufacturer ID."""
+    cur.execute(
+        """
+        WITH RECURSIVE chain AS (
+            SELECT id, merged_into, 0 AS depth
+            FROM manufacturers
+            WHERE id = %s
+            UNION ALL
+            SELECT m.id, m.merged_into, c.depth + 1
+            FROM manufacturers m
+            JOIN chain c ON m.id = c.merged_into
+            WHERE c.merged_into IS NOT NULL AND c.depth < 16
+        )
+        SELECT id
+        FROM chain
+        WHERE merged_into IS NULL
+        ORDER BY depth DESC
+        LIMIT 1
+        """,
+        (manufacturer_id,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else manufacturer_id
+
+
 def resolve_manufacturer_id(conn, raw_manufacturer: Optional[str], cache: Optional[dict] = None) -> Optional[int]:
-    """Get-or-create the canonical manufacturer and its normalised alias."""
+    """Get-or-create the canonical surviving manufacturer and its normalised alias."""
     alias = normalize_string(raw_manufacturer)
     if not alias:
         return None
@@ -400,9 +427,15 @@ def resolve_manufacturer_id(conn, raw_manufacturer: Optional[str], cache: Option
         cur.execute("SELECT manufacturer_id FROM manufacturer_aliases WHERE alias = %s", (alias,))
         row = cur.fetchone()
         if row:
+            canonical_id = _follow_merged_into(cur, row[0])
+            if canonical_id != row[0]:
+                cur.execute(
+                    "UPDATE manufacturer_aliases SET manufacturer_id = %s WHERE alias = %s",
+                    (canonical_id, alias),
+                )
             if cache is not None:
-                cache[alias] = row[0]
-            return row[0]
+                cache[alias] = canonical_id
+            return canonical_id
 
         cur.execute(
             """
@@ -413,12 +446,13 @@ def resolve_manufacturer_id(conn, raw_manufacturer: Optional[str], cache: Option
             """,
             (alias, str(raw_manufacturer).strip()),
         )
-        manufacturer_id = cur.fetchone()[0]
+        inserted_id = cur.fetchone()[0]
+        manufacturer_id = _follow_merged_into(cur, inserted_id)
         cur.execute(
             """
             INSERT INTO manufacturer_aliases (alias, manufacturer_id)
             VALUES (%s, %s)
-            ON CONFLICT (alias) DO NOTHING
+            ON CONFLICT (alias) DO UPDATE SET manufacturer_id = EXCLUDED.manufacturer_id
             """,
             (alias, manufacturer_id),
         )
@@ -558,6 +592,7 @@ def build_row(product: dict, features: Optional[ProductFeatures]) -> dict:
 
     return {
         "id": product["id"],
+        "raw_name": raw_name,
         "manufacturer_raw": features.manufacturer,
         "product_name": clean_product_name(
             features.product_name or raw_name, raw_name, features.manufacturer, metadata
@@ -659,6 +694,12 @@ def save_features(conn, rows: List[dict]) -> int:
     cache: dict = {}
     for row in rows:
         manufacturer_id = resolve_manufacturer_id(conn, row["manufacturer_raw"], cache)
+        name_key, name_sorted, variant_key = compute_keys(
+            row["product_name"], row.get("raw_name") or row["product_name"], row["metadata"]
+        )
+        variant_json = json.dumps(
+            variant_dict(row["metadata"]), ensure_ascii=False, sort_keys=True
+        )
         payload.append(
             (
                 str(row["id"]),
@@ -672,6 +713,11 @@ def save_features(conn, rows: List[dict]) -> int:
                 row["features_confidence"],
                 FEATURES_VERSION,
                 now,
+                name_key,
+                name_sorted,
+                variant_key,
+                variant_json,
+                KEY_VERSION,
             )
         )
 
@@ -689,16 +735,23 @@ def save_features(conn, rows: List[dict]) -> int:
                 metadata              = v.metadata::jsonb,
                 features_confidence   = v.features_confidence,
                 features_version      = v.features_version,
-                features_extracted_at = v.extracted_at
+                features_extracted_at = v.extracted_at,
+                product_name_key      = v.product_name_key,
+                product_name_sorted   = v.product_name_sorted,
+                variant_key           = v.variant_key,
+                variant               = v.variant::jsonb,
+                grouping_keys_version = v.grouping_keys_version
             FROM (VALUES %s) AS v(
                 id, manufacturer_id, product_name, quantity_value, quantity_unit,
-                quantity_raw, is_fluid, metadata, features_confidence, features_version, extracted_at
+                quantity_raw, is_fluid, metadata, features_confidence, features_version,
+                extracted_at, product_name_key, product_name_sorted, variant_key,
+                variant, grouping_keys_version
             )
             WHERE p.id = v.id::uuid
             """,
             payload,
             page_size=500,
-            template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         )
     conn.commit()
     return len(payload)

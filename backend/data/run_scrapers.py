@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+PARTIAL_FAILURE_EXIT_CODE = 3
 
 
 def timestamp() -> str:
@@ -187,7 +188,11 @@ def main() -> int:
         finally:
             conn.close()
 
-    return 0 if failed == 0 else 1
+    if failed == 0:
+        return 0
+    if passed > 0:
+        return PARTIAL_FAILURE_EXIT_CODE
+    return 1
 
 
 if __name__ == "__main__":

@@ -49,11 +49,13 @@ from backend.data.grouping_rules import (
     NON_FOOD_CATEGORIES,
     clean_name_tokens,
     clean_variant_allowlist,
+    compute_keys,
     extract_raw_safety_sig,
     guarded_fuzzy_merge,
     recover_qty_from_singular_price,
     smart_merge_block,
     unified_base_qty,
+    variant_dict,
 )
 from backend.data.local_embeddings import (
     DEFAULT_BGE_MARGIN,
@@ -65,7 +67,7 @@ from backend.data.local_embeddings import (
 
 FEATURE_ROWS_SQL = """
     SELECT id, market, manufacturer_id, product_name, product_name_key, product_name_sorted,
-           quantity_value, quantity_unit, is_fluid, variant, price, singular_price, in_stock,
+           quantity_value, quantity_unit, is_fluid, variant, metadata, price, singular_price, in_stock,
            main_category, sub_category, name
     FROM products
     WHERE features_extracted_at IS NOT NULL
@@ -421,10 +423,18 @@ def prepare_rows_layer1(
     recovered_sp = 0
 
     for row in featured:
-        if not row["product_name_sorted"]:
-            singletons.append(row)
-            continue
         d = dict(row)
+        if not d.get("product_name_sorted") or not d.get("product_name_key"):
+            name_key, name_sorted, _ = compute_keys(
+                d.get("product_name"), d.get("name"), d.get("metadata")
+            )
+            if not name_sorted:
+                singletons.append(row)
+                continue
+            d["product_name_key"] = name_key
+            d["product_name_sorted"] = name_sorted
+            if d.get("variant") is None:
+                d["variant"] = variant_dict(d.get("metadata"))
         raw_sig = extract_raw_safety_sig(d["name"])
         d["_raw_sig"] = raw_sig
 

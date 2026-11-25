@@ -10,7 +10,7 @@ PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from backend.data.run_scrapers import find_scraper_scripts
+from backend.data.run_scrapers import PARTIAL_FAILURE_EXIT_CODE, find_scraper_scripts
 
 SCRIPTS = [
     "run_scrapers.py",
@@ -22,6 +22,7 @@ SCRIPTS = [
 def main() -> int:
     data_dir = Path(__file__).parent.resolve()
     failed = []
+    warnings = []
 
     num_scrapers = len(find_scraper_scripts(data_dir / "scrapers"))
 
@@ -54,6 +55,14 @@ def main() -> int:
         )
         elapsed = round(time.perf_counter() - start, 2)
 
+        if script == "run_scrapers.py" and result.returncode == PARTIAL_FAILURE_EXIT_CODE:
+            print(
+                f"{script} finished with partial scraper failures after {elapsed}s "
+                f"— continuing pipeline with the markets that succeeded."
+            )
+            warnings.append(script)
+            continue
+
         if result.returncode != 0:
             print(f"{script} failed (exit code {result.returncode}) after {elapsed}s")
             failed.append(script)
@@ -64,6 +73,9 @@ def main() -> int:
     if failed:
         print(f"Pipeline stopped. Failed: {', '.join(failed)}")
         return 1
+    if warnings:
+        print(f"Pipeline completed with partial warnings: {', '.join(warnings)}")
+        return 0
     print("Pipeline completed successfully.")
     return 0
 
