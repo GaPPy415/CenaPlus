@@ -57,6 +57,11 @@ class ApiReadModelTests(unittest.TestCase):
                 self.assertEqual(res["manufacturer"]["categories"], expected_cats, name)
                 self.assertEqual(res["manufacturer"]["markets"], expected_markets, name)
                 self.assertEqual(len(res["data"]), min(12, expected_groups), name)
+                self.assertEqual(
+                    sum(s["count"] for s in res["subcategories"]),
+                    expected_groups,
+                    name,
+                )
 
                 # Sorted by group_name and no internal columns leaked
                 names = [row["group_name"] for row in res["data"]]
@@ -65,6 +70,50 @@ class ApiReadModelTests(unittest.TestCase):
                     self.assertEqual(set(row.keys()), EXPECTED_GROUP_KEYS)
                     prices = [p["price"] for p in row["products"] if p["price"] is not None]
                     self.assertEqual(prices, sorted(prices))
+
+    def test_manufacturer_subcategory_filter(self):
+        unfiltered = get_manufacturer_products("др еткер", page=1, per_page=12)
+        subs = unfiltered["subcategories"]
+        self.assertGreater(len(subs), 2)
+
+        first, second = subs[0], subs[1]
+        key_first = f"{first['main_category']}::{first['sub_category']}"
+        key_second = f"{second['main_category']}::{second['sub_category']}"
+
+        # Single subcategory filter via main::sub key
+        one = get_manufacturer_products("др еткер", page=1, per_page=12, sub_category=[key_first])
+        self.assertEqual(one["total"], first["count"])
+        self.assertEqual(one["manufacturer"]["groups"], unfiltered["manufacturer"]["groups"])
+        self.assertEqual(one["subcategories"], subs)
+        self.assertEqual(len(one["data"]), min(12, first["count"]))
+        for row in one["data"]:
+            self.assertEqual(row["main_category"], first["main_category"])
+            self.assertEqual(row["sub_category"], first["sub_category"])
+
+        # Multi-subcategory filter
+        two = get_manufacturer_products(
+            "др еткер", page=1, per_page=36, sub_category=[key_first, key_second]
+        )
+        self.assertEqual(two["total"], first["count"] + second["count"])
+        allowed = {
+            (first["main_category"], first["sub_category"]),
+            (second["main_category"], second["sub_category"]),
+        }
+        for row in two["data"]:
+            self.assertIn((row["main_category"], row["sub_category"]), allowed)
+
+        # Plain subcategory name (without main:: prefix) also works
+        plain = get_manufacturer_products(
+            "др еткер", page=1, per_page=12, sub_category=[first["sub_category"]]
+        )
+        self.assertGreaterEqual(plain["total"], first["count"])
+
+        # Non-matching subcategory yields 0 rows without error
+        empty = get_manufacturer_products(
+            "др еткер", page=1, per_page=12, sub_category=["Непостоечка::Поткатегорија"]
+        )
+        self.assertEqual(empty["total"], 0)
+        self.assertEqual(empty["data"], [])
 
     def test_manufacturer_not_found_returns_404(self):
         with self.assertRaises(HTTPException) as ctx:

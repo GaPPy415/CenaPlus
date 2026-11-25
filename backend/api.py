@@ -152,6 +152,19 @@ MANUFACTURER_GROUPS_SQL = """
     LIMIT %s OFFSET %s
 """
 
+MANUFACTURER_GROUPS_SUBCATEGORY_SQL = """
+    SELECT group_id,
+           group_name,
+           main_category,
+           sub_category,
+           products
+    FROM grouped_products
+    WHERE manufacturer_id = %s
+      AND (main_category || '::' || sub_category) = ANY(%s::text[])
+    ORDER BY group_name
+    LIMIT %s OFFSET %s
+"""
+
 RESOLVE_MANUFACTURER_SQL = """
     WITH RECURSIVE seed AS (
         SELECT m.id, m.canonical_name, m.display_name, m.merged_into, 0 AS priority
@@ -185,10 +198,40 @@ RESOLVE_MANUFACTURER_SQL = """
            r.display_name,
            COALESCE(ms.groups, 0) AS groups,
            COALESCE(ms.categories, 0) AS categories,
-           COALESCE(ms.markets, 0) AS markets
+           COALESCE(ms.markets, 0) AS markets,
+           COALESCE(ms.subcategories, '[]'::jsonb) AS subcategories
     FROM resolved r
     LEFT JOIN manufacturer_stats ms ON ms.manufacturer_id = r.id
 """
+
+
+def _match_manufacturer_subcategories(
+    available: list[dict],
+    requested: list[str],
+) -> tuple[list[str], int]:
+    """Match requested `sub_category` params (`main::sub` or plain `sub`) against
+    precomputed manufacturer subcategories, returning `(exact_keys, filtered_total)`.
+    """
+    pair_filters: set[tuple[str, str]] = set()
+    plain_filters: set[str] = set()
+    for raw in requested:
+        token = (raw or "").strip()
+        if not token:
+            continue
+        if "::" in token:
+            main_cat, sub_cat = token.split("::", 1)
+            pair_filters.add((main_cat, sub_cat))
+        else:
+            plain_filters.add(token)
+
+    matched_keys: list[str] = []
+    total = 0
+    for item in available:
+        mc, sc = item["main_category"], item["sub_category"]
+        if (mc, sc) in pair_filters or sc in plain_filters:
+            matched_keys.append(f"{mc}::{sc}")
+            total += int(item["count"])
+    return matched_keys, total
 
 
 @app.get("/manufacturer")
@@ -196,12 +239,15 @@ def get_manufacturer_products(
     manufacturer_name: str = Query(..., min_length=1),
     page: int = Query(1, ge=1),
     per_page: PerPage = Query(PerPage.twelve),
+    sub_category: list[str] = Query(None),
 ):
     """All grouped products of one manufacturer, across every category."""
     # `per_page` arrives as the enum through FastAPI, but plain ints are accepted
     # too so the function stays callable directly (tests, scripts).
     per_page_value = int(getattr(per_page, "value", per_page))
     needle = normalize_string(manufacturer_name) or manufacturer_name.strip().lower()
+    raw_subs = sub_category if isinstance(sub_category, (list, tuple)) else []
+    active_sub_filters = [s for s in raw_subs if (s or "").strip()]
 
     with get_cursor() as cur:
         cur.execute(RESOLVE_MANUFACTURER_SQL, (needle, needle))
@@ -209,22 +255,41 @@ def get_manufacturer_products(
         if not manufacturer:
             raise HTTPException(404, "Manufacturer not found")
 
-        total = manufacturer["groups"]
-        if total > 0:
-            offset = per_page_value * (page - 1)
-            cur.execute(MANUFACTURER_GROUPS_SQL, (manufacturer["id"], per_page_value, offset))
-            rows = cur.fetchall()
+        subcategories = manufacturer["subcategories"] or []
+        offset = per_page_value * (page - 1)
+
+        if active_sub_filters:
+            matched_keys, total = _match_manufacturer_subcategories(
+                subcategories, active_sub_filters
+            )
+            if total > 0:
+                cur.execute(
+                    MANUFACTURER_GROUPS_SUBCATEGORY_SQL,
+                    (manufacturer["id"], matched_keys, per_page_value, offset),
+                )
+                rows = cur.fetchall()
+            else:
+                rows = []
         else:
-            rows = []
+            total = manufacturer["groups"]
+            if total > 0:
+                cur.execute(
+                    MANUFACTURER_GROUPS_SQL,
+                    (manufacturer["id"], per_page_value, offset),
+                )
+                rows = cur.fetchall()
+            else:
+                rows = []
 
     return {
         "manufacturer": {
             "name": manufacturer["canonical_name"],
             "display_name": manufacturer["display_name"] or manufacturer["canonical_name"],
-            "groups": total,
+            "groups": manufacturer["groups"],
             "categories": manufacturer["categories"],
             "markets": manufacturer["markets"],
         },
+        "subcategories": subcategories,
         "total": total,
         "page": page,
         "per_page": per_page_value,

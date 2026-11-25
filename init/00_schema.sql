@@ -268,9 +268,11 @@ WITH DATA;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_grouped_products_group_id
     ON public.grouped_products USING btree (group_id);
 
--- /manufacturer hot path: pure ordered range scan, zero join, zero sort
+-- /manufacturer hot path: pure ordered range scan, zero join, zero sort;
+-- INCLUDE (main_category, sub_category) keeps subcategory-filtered scans index-only until LIMIT
 CREATE INDEX IF NOT EXISTS idx_grouped_products_manufacturer_name
     ON public.grouped_products USING btree (manufacturer_id, group_name)
+    INCLUDE (main_category, sub_category)
     WHERE manufacturer_id IS NOT NULL;
 
 -- /{main}/{sub} hot path: covering index with INCLUDE (markets) for index-only counts
@@ -279,17 +281,64 @@ CREATE INDEX IF NOT EXISTS idx_grouped_products_category_name
     ON public.grouped_products USING btree (main_category, sub_category, group_name)
     INCLUDE (markets);
 
--- O(1) manufacturer header stats (groups, categories, markets)
+-- O(1) manufacturer header stats (groups, categories, markets, subcategories)
 CREATE MATERIALIZED VIEW IF NOT EXISTS public.manufacturer_stats AS
-SELECT g.manufacturer_id,
-       count(DISTINCT g.id)::int AS groups,
-       count(DISTINCT g.main_category)::int AS categories,
-       count(DISTINCT p.market)::int AS markets
-FROM public.groups g
-JOIN public.products p ON p.group_id = g.id
-WHERE g.manufacturer_id IS NOT NULL
-  AND p.in_stock = true
-GROUP BY g.manufacturer_id
+WITH visible_groups AS (
+    SELECT g.id, g.manufacturer_id, g.main_category, g.sub_category
+    FROM public.groups g
+    WHERE g.manufacturer_id IS NOT NULL
+      AND EXISTS (
+          SELECT 1
+          FROM public.products p
+          WHERE p.group_id = g.id AND p.in_stock = true
+      )
+),
+sub_counts AS (
+    SELECT manufacturer_id,
+           main_category,
+           sub_category,
+           count(*)::int AS count
+    FROM visible_groups
+    GROUP BY manufacturer_id, main_category, sub_category
+),
+base_counts AS (
+    SELECT manufacturer_id,
+           sum(count)::int AS groups,
+           count(DISTINCT main_category)::int AS categories
+    FROM sub_counts
+    GROUP BY manufacturer_id
+),
+sub_agg AS (
+    SELECT manufacturer_id,
+           jsonb_agg(
+               jsonb_build_object(
+                   'main_category', main_category,
+                   'sub_category', sub_category,
+                   'count', count
+               )
+               ORDER BY count DESC, sub_category ASC
+           ) AS subcategories
+    FROM sub_counts
+    WHERE main_category IS NOT NULL AND sub_category IS NOT NULL
+    GROUP BY manufacturer_id
+),
+market_counts AS (
+    SELECT g.manufacturer_id,
+           count(DISTINCT p.market)::int AS markets
+    FROM public.groups g
+    JOIN public.products p ON p.group_id = g.id
+    WHERE g.manufacturer_id IS NOT NULL
+      AND p.in_stock = true
+    GROUP BY g.manufacturer_id
+)
+SELECT b.manufacturer_id,
+       b.groups,
+       b.categories,
+       COALESCE(mc.markets, 0)::int AS markets,
+       COALESCE(sa.subcategories, '[]'::jsonb) AS subcategories
+FROM base_counts b
+LEFT JOIN sub_agg sa ON sa.manufacturer_id = b.manufacturer_id
+LEFT JOIN market_counts mc ON mc.manufacturer_id = b.manufacturer_id
 WITH DATA;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_manufacturer_stats_manufacturer_id

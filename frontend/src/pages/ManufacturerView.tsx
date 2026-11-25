@@ -1,6 +1,16 @@
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Boxes, RefreshCw, Store, Tags } from "lucide-react";
+import {
+  ArrowLeft,
+  Boxes,
+  ChevronDown,
+  RefreshCw,
+  SlidersHorizontal,
+  Store,
+  Tags,
+  X,
+} from "lucide-react";
 
 import ProductCard from "@/components/ProductCard";
 import Pagination from "@/components/Pagination";
@@ -8,14 +18,23 @@ import { fetchManufacturer } from "@/lib/api";
 
 const PER_PAGE_OPTIONS = [12, 24, 36] as const;
 
+const subCategoryKey = (mainCategory: string, subCategory: string) =>
+  `${mainCategory}::${subCategory}`;
+
 const ManufacturerView = () => {
   const [params, setParams] = useSearchParams();
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const name = params.get("manufacturer_name") ?? "";
   const page = Math.max(1, parseInt(params.get("page") ?? "1", 10) || 1);
   const perPageParam = parseInt(params.get("per_page") ?? "12", 10);
   const perPage = (PER_PAGE_OPTIONS as readonly number[]).includes(perPageParam)
     ? (perPageParam as 12 | 24 | 36)
     : 12;
+  const selectedSubs = params.getAll("sub").filter(Boolean);
+
+  useEffect(() => {
+    setFiltersOpen(false);
+  }, [name]);
 
   const updateParams = (patch: Record<string, string>) => {
     const next = new URLSearchParams(params);
@@ -24,12 +43,54 @@ const ManufacturerView = () => {
     window.scrollTo({ top: 0 });
   };
 
+  const setSubCategories = (nextSubs: string[]) => {
+    const next = new URLSearchParams(params);
+    next.delete("sub");
+    nextSubs.forEach((sc) => next.append("sub", sc));
+    next.set("page", "1");
+    setParams(next);
+    window.scrollTo({ top: 0 });
+  };
+
+  const toggleSubCategory = (key: string) => {
+    const nextSubs = selectedSubs.includes(key)
+      ? selectedSubs.filter((item) => item !== key)
+      : [...selectedSubs, key];
+    setSubCategories(nextSubs);
+  };
+
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["manufacturer", name, page, perPage],
-    queryFn: () => fetchManufacturer(name, page, perPage),
+    queryKey: ["manufacturer", name, page, perPage, selectedSubs],
+    queryFn: () => fetchManufacturer(name, page, perPage, selectedSubs),
     enabled: Boolean(name),
     retry: 1,
   });
+
+  // Disambiguate duplicate subcategory names (e.g. "Останато" across main categories)
+  const duplicateSubNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of data?.subcategories ?? []) {
+      counts.set(item.sub_category, (counts.get(item.sub_category) ?? 0) + 1);
+    }
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([sub]) => sub)
+    );
+  }, [data?.subcategories]);
+
+  const hasSubFilter = Boolean(data && data.subcategories.length > 1);
+
+  const activeSubItems = useMemo(() => {
+    if (!data || selectedSubs.length === 0) return [];
+    return data.subcategories.filter((item) => {
+      const key = subCategoryKey(item.main_category, item.sub_category);
+      return selectedSubs.includes(key) || selectedSubs.includes(item.sub_category);
+    });
+  }, [data, selectedSubs]);
+
+  const formatSubLabel = (mainCategory: string, subCategory: string) =>
+    duplicateSubNames.has(subCategory) ? `${subCategory} (${mainCategory})` : subCategory;
 
   const totalPages = data ? Math.ceil(data.total / data.per_page) : 0;
 
@@ -104,25 +165,194 @@ const ManufacturerView = () => {
         )}
       </header>
 
-      {/* Per page */}
-      {data && data.total > 0 && (
-        <div className="mt-6 flex items-center justify-end gap-2">
-          <span className="text-sm text-muted-foreground">По страна:</span>
-          {PER_PAGE_OPTIONS.map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => updateParams({ per_page: String(option), page: "1" })}
-              aria-pressed={perPage === option}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                perPage === option
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
+      {/* Controls toolbar: progressive-disclosure subcategory toggle + count + per-page */}
+      {data && (data.total > 0 || selectedSubs.length > 0 || hasSubFilter) && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {hasSubFilter && (
+              <button
+                type="button"
+                onClick={() => setFiltersOpen((open) => !open)}
+                aria-expanded={filtersOpen}
+                aria-controls="manufacturer-subcategories-panel"
+                className={`inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  filtersOpen || selectedSubs.length > 0
+                    ? "border-primary/40 bg-primary/10 text-foreground hover:bg-primary/15"
+                    : "border-border bg-card text-foreground hover:bg-accent"
+                }`}
+              >
+                <SlidersHorizontal className="h-4 w-4 text-primary" aria-hidden="true" />
+                <span>Поткатегории</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                    selectedSubs.length > 0
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {selectedSubs.length > 0 ? selectedSubs.length : data.subcategories.length}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ease-out motion-reduce:transition-none ${
+                    filtersOpen ? "rotate-180" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+              </button>
+            )}
+
+            <p className="text-sm text-muted-foreground tabular-nums">
+              {selectedSubs.length > 0
+                ? `Прикажани ${data.total} од ${data.manufacturer.groups} производи`
+                : `${data.total} производи`}
+            </p>
+          </div>
+
+          {data.total > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">По страна:</span>
+              {PER_PAGE_OPTIONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => updateParams({ per_page: String(option), page: "1" })}
+                  aria-pressed={perPage === option}
+                  className={`min-h-[36px] cursor-pointer rounded-md px-3 py-1 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    perPage === option
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Active filter summary pills when panel is collapsed so applied filters stay obvious */}
+      {hasSubFilter && !filtersOpen && activeSubItems.length > 0 && (
+        <div
+          aria-label="Активни филтри по поткатегорија"
+          className="mt-3 flex flex-wrap items-center gap-2"
+        >
+          {activeSubItems.map((item) => {
+            const key = subCategoryKey(item.main_category, item.sub_category);
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggleSubCategory(key)}
+                aria-label={`Отстрани филтер ${item.sub_category}`}
+                className="inline-flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span>{formatSubLabel(item.main_category, item.sub_category)}</span>
+                <span className="tabular-nums opacity-75">({item.count})</span>
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setSubCategories([])}
+            className="inline-flex min-h-[36px] cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Ресетирај сè
+          </button>
+        </div>
+      )}
+
+      {/* Collapsible subcategory filter drawer (default hidden) */}
+      {hasSubFilter && data && (
+        <div
+          id="manufacturer-subcategories-panel"
+          aria-hidden={!filtersOpen}
+          className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
+            filtersOpen
+              ? "mt-3 grid-rows-[1fr] opacity-100"
+              : "grid-rows-[0fr] opacity-0"
+          }`}
+        >
+          <div className={`overflow-hidden ${filtersOpen ? "visible" : "invisible"}`}>
+            <section
+              aria-label="Филтер по поткатегорија"
+              className="rounded-xl border border-border bg-card/70 p-4 shadow-sm"
             >
-              {option}
-            </button>
-          ))}
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Изберете една или повеќе поткатегории за да ги стесните резултатите
+                </p>
+                {selectedSubs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSubCategories([])}
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    Ресетирај ({selectedSubs.length})
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSubCategories([])}
+                  aria-pressed={selectedSubs.length === 0}
+                  className={`inline-flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    selectedSubs.length === 0
+                      ? "border-transparent bg-primary text-primary-foreground"
+                      : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+                  }`}
+                >
+                  <span>Сите</span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-xs tabular-nums ${
+                      selectedSubs.length === 0
+                        ? "bg-primary-foreground/20 text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {data.manufacturer.groups}
+                  </span>
+                </button>
+
+                {data.subcategories.map((item) => {
+                  const key = subCategoryKey(item.main_category, item.sub_category);
+                  const active =
+                    selectedSubs.includes(key) || selectedSubs.includes(item.sub_category);
+                  const label = formatSubLabel(item.main_category, item.sub_category);
+
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => toggleSubCategory(key)}
+                      aria-pressed={active}
+                      title={`${item.main_category} / ${item.sub_category}`}
+                      className={`inline-flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        active
+                          ? "border-transparent bg-primary text-primary-foreground"
+                          : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+                      }`}
+                    >
+                      <span>{label}</span>
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-xs tabular-nums ${
+                          active
+                            ? "bg-primary-foreground/20 text-primary-foreground"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {item.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
         </div>
       )}
 

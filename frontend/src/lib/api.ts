@@ -93,6 +93,12 @@ export async function searchProducts(query: string): Promise<SearchResponse> {
   return res.json();
 }
 
+export interface ManufacturerSubCategory {
+  main_category: string;
+  sub_category: string;
+  count: number;
+}
+
 export interface ManufacturerListing {
   manufacturer: {
     name: string;
@@ -101,6 +107,7 @@ export interface ManufacturerListing {
     categories: number;
     markets: number;
   };
+  subcategories: ManufacturerSubCategory[];
   total: number;
   page: number;
   per_page: number;
@@ -110,9 +117,13 @@ export interface ManufacturerListing {
 export async function fetchManufacturer(
   manufacturerName: string,
   page = 1,
-  perPage: 12 | 24 | 36 = 12
+  perPage: 12 | 24 | 36 = 12,
+  subCategories: string[] = []
 ): Promise<ManufacturerListing> {
-  const url = `${API_BASE}/manufacturer?manufacturer_name=${encodeURIComponent(manufacturerName)}&page=${page}&per_page=${perPage}`;
+  let url = `${API_BASE}/manufacturer?manufacturer_name=${encodeURIComponent(manufacturerName)}&page=${page}&per_page=${perPage}`;
+  for (const sc of subCategories) {
+    url += `&sub_category=${encodeURIComponent(sc)}`;
+  }
   const res = await fetch(url);
   if (res.status === 404) throw new Error("Manufacturer not found");
   if (!res.ok) throw new Error(`Failed to fetch manufacturer: ${res.status}`);
