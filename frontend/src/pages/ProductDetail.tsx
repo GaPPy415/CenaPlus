@@ -75,24 +75,24 @@ const OfferRow = ({ offer }: { offer: ProductOffer }) => {
   );
 
   return (
-    <li className="price-row gap-3">
+    <li className="price-row gap-3 py-2">
       {hasLink ? (
         <a
           href={offer.link as string}
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`Отвори ${offer.name} во ${market.name}`}
-          className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {offerInfo}
         </a>
       ) : (
-        <div className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-md px-1">
+        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-0.5">
           {offerInfo}
         </div>
       )}
 
-      <div className="flex flex-shrink-0 flex-col items-end text-right">
+      <div className="flex flex-shrink-0 flex-col items-end justify-center text-right">
         <div className="flex flex-wrap items-baseline justify-end gap-1.5">
           {discountPct !== null && (
             <>
@@ -108,6 +108,7 @@ const OfferRow = ({ offer }: { offer: ProductOffer }) => {
             </>
           )}
           <span
+            title={updated ? `Последна промена на цена на производот: ${updated}` : undefined}
             className={`text-sm font-semibold tabular-nums ${
               discountPct !== null ? "text-sale-soft-foreground" : "text-card-foreground"
             }`}
@@ -115,32 +116,37 @@ const OfferRow = ({ offer }: { offer: ProductOffer }) => {
             {offer.price} ден.
           </span>
         </div>
-        {offer.singular_price && (
-          <span className="text-xs tabular-nums text-muted-foreground">{offer.singular_price}</span>
-        )}
-        <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-          {offer.in_stock ? (
-            <>
-              <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-              Има залиха
-            </>
-          ) : (
-            <>
-              <AlertTriangle className="h-3 w-3 text-destructive" aria-hidden="true" />
-              Нема залиха
-            </>
+
+        <div className="mt-0.5 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+          {offer.singular_price && (
+            <span className="tabular-nums">{offer.singular_price}</span>
           )}
-          {updated && <span className="text-muted-foreground/70">· {updated}</span>}
-        </span>
-        {marketUpdated && (
           <span
-            className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground/80"
-            title={`Последно ажурирање на цените во ${market.name}`}
+            className="inline-flex items-center gap-1"
+            title={updated ? `Последна промена на производот: ${updated}` : undefined}
           >
-            <RefreshCw className="h-3 w-3" aria-hidden="true" />
-            Ажурирано {marketUpdated}
+            {offer.in_stock ? (
+              <>
+                <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                Има залиха
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="h-3 w-3 text-destructive" aria-hidden="true" />
+                Нема залиха
+              </>
+            )}
           </span>
-        )}
+          {marketUpdated && (
+            <span
+              className="inline-flex items-center gap-1 tabular-nums text-muted-foreground/80"
+              title={`Последно ажурирање на цените во ${market.name}`}
+            >
+              <RefreshCw className="h-3 w-3" aria-hidden="true" />
+              {marketUpdated}
+            </span>
+          )}
+        </div>
       </div>
     </li>
   );
