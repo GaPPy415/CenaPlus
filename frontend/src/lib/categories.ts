@@ -26,16 +26,16 @@ export const CATEGORY_ICONS: Record<string, string> = {
 };
 
 export const MARKET_INFO: Record<string, { name: string; color: string }> = {
-  reptil: { name: "Reptil", color: "hsl(var(--market-reptil))" },
-  zito: { name: "Жито Маркет", color: "hsl(var(--market-zito))" },
-  kam: { name: "КАМ", color: "hsl(var(--market-kam))" },
-  ramstore: { name: "Ramstore", color: "hsl(var(--market-ramstore))" },
   vero: { name: "Веро", color: "hsl(var(--market-vero))" },
-  bigshop: { name: "BigShop", color: "hsl(var(--market-bigshop))" },
-  stokomak: { name: "Стокомак", color: "hsl(var(--market-stokomak))" },
   dim: { name: "ДИМ Маркет", color: "hsl(var(--market-dim))" },
-  zur: { name: "Зур", color: "hsl(var(--market-zur))" },
   elida: { name: "Елида", color: "hsl(var(--market-elida))" },
-  spar: { name: "SPAR", color: "hsl(var(--market-spar))" },
+  zito: { name: "Жито Маркет", color: "hsl(var(--market-zito))" },
+  zur: { name: "Зур", color: "hsl(var(--market-zur))" },
+  kam: { name: "КАМ", color: "hsl(var(--market-kam))" },
+  stokomak: { name: "Стокомак", color: "hsl(var(--market-stokomak))" },
+  bigshop: { name: "BigShop", color: "hsl(var(--market-bigshop))" },
   kipper: { name: "Kipper", color: "hsl(var(--market-kipper))" },
+  ramstore: { name: "Ramstore", color: "hsl(var(--market-ramstore))" },
+  reptil: { name: "Reptil", color: "hsl(var(--market-reptil))" },
+  spar: { name: "SPAR", color: "hsl(var(--market-spar))" },
 };

@@ -27,7 +27,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
         aria-label={`Детали за ${group.group_name}`}
         className="block rounded-t-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <div className="relative flex h-48 items-center justify-center overflow-hidden rounded-t-xl bg-muted/30 p-4">
+        <div className="relative flex h-40 items-center justify-center overflow-hidden rounded-t-xl bg-muted/30 p-3">
           {saleSummary && (
             <span
               className="absolute left-2.5 top-2.5 z-10 inline-flex items-center gap-1 rounded-full bg-sale px-2.5 py-0.5 text-xs font-bold tabular-nums text-sale-foreground shadow-sm"
@@ -124,7 +124,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                   aria-hidden="true"
                 />
               </div>
-              <div className="flex flex-shrink-0 items-center gap-2.5">
+              <div className="flex flex-shrink-0 items-center gap-2">
                 <div className="flex flex-col items-end text-right">
                   {discountPct !== null && (
                     <span className="flex items-center gap-1 text-[11px] leading-none tabular-nums">
@@ -156,7 +156,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                     e.preventDefault();
                     e.stopPropagation();
                   }}
-                  className="flex h-8 w-[84px] items-center justify-end"
+                  className="flex h-8 w-[74px] items-center justify-end"
                 >
                   {quantity > 0 ? (
                     <div className="flex h-full w-full items-center overflow-hidden rounded-full border bg-background shadow-sm transition-all">
@@ -167,7 +167,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                       >
                         <Minus className="h-3 w-3" aria-hidden="true" />
                       </button>
-                      <span className="min-w-[1.5rem] text-center text-xs font-medium tabular-nums">
+                      <span className="min-w-[1.25rem] text-center text-xs font-medium tabular-nums">
                         {quantity}
                       </span>
                       <button
@@ -181,10 +181,10 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                   ) : (
                     <button
                       onClick={() => addItem(product)}
-                      className="flex h-full w-full translate-x-2 items-center justify-center gap-1.5 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground opacity-0 shadow-sm transition-all hover:bg-primary/90 focus-visible:opacity-100 group-hover/row:translate-x-0 group-hover/row:opacity-100"
+                      className="flex h-full w-full translate-x-2 items-center justify-center gap-1 rounded-full bg-primary px-2 text-xs font-medium text-primary-foreground opacity-0 shadow-sm transition-all hover:bg-primary/90 focus-visible:opacity-100 group-hover/row:translate-x-0 group-hover/row:opacity-100"
                       aria-label={`Додај ${market.name} во кошничка`}
                     >
-                      <ShoppingCart className="h-3.5 w-3.5" aria-hidden="true" />
+                      <ShoppingCart className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                       <span>Додај</span>
                     </button>
                   )}

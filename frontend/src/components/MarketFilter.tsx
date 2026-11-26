@@ -1,7 +1,9 @@
 import { Check, ChevronDown, Percent, SlidersHorizontal, Store, X } from "lucide-react";
 import { MARKET_INFO } from "@/lib/categories";
 
-const ALL_MARKETS = Object.keys(MARKET_INFO);
+const ALL_MARKETS = Object.keys(MARKET_INFO).sort((a, b) =>
+  MARKET_INFO[a].name.localeCompare(MARKET_INFO[b].name, "mk")
+);
 
 interface SidebarProps {
   selectedMarkets: string[];
@@ -26,9 +28,9 @@ export const MarketFilterSidebar = ({
   return (
     <aside
       aria-label="Филтри"
-      className="hidden lg:sticky lg:top-24 lg:block lg:self-start min-[1440px]:col-start-1 min-[1440px]:justify-self-center min-[1440px]:px-4"
+      className="hidden lg:sticky lg:top-24 lg:block lg:self-start"
     >
-      <div className="w-52 rounded-xl border border-border bg-card p-3.5 shadow-sm min-[1680px]:w-56 min-[1680px]:p-4">
+      <div className="w-full rounded-xl border border-border bg-card p-3.5 shadow-sm xl:p-4">
         {onToggleOnSale && (
           <div className="mb-3 border-b border-border pb-3">
             <button

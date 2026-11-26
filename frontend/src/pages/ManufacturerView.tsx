@@ -44,10 +44,10 @@ const ManufacturerView = () => {
   const [mobileMarketsOpen, setMobileMarketsOpen] = useState(false);
   const name = params.get("manufacturer_name") ?? "";
   const page = Math.max(1, parseInt(params.get("page") ?? "1", 10) || 1);
-  const perPageParam = parseInt(params.get("per_page") ?? "12", 10);
+  const perPageParam = parseInt(params.get("per_page") ?? "24", 10);
   const perPage = (PER_PAGE_OPTIONS as readonly number[]).includes(perPageParam)
     ? (perPageParam as 12 | 24 | 36)
-    : 12;
+    : 24;
   const selectedSubs = params.getAll("sub").filter(Boolean);
   const selectedMarkets = params.getAll("market").filter(Boolean);
   const onSaleOnly = params.get("on_sale") === "1";
@@ -185,8 +185,8 @@ const ManufacturerView = () => {
 
   return (
     <main className="w-full py-8">
-      <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-6 px-4 lg:max-w-7xl lg:grid-cols-[13.5rem_minmax(0,1fr)] min-[1440px]:max-w-none min-[1440px]:grid-cols-[1fr_minmax(0,62rem)_1fr] min-[1440px]:gap-0 min-[1440px]:px-0 min-[1680px]:grid-cols-[1fr_minmax(0,72rem)_1fr]">
-        {/* Desktop left sticky sidebar: centered in the left gutter on >=1440px */}
+      <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 px-4 sm:px-6 lg:grid-cols-[13.5rem_minmax(0,1fr)] xl:grid-cols-[14rem_minmax(0,1fr)] xl:gap-8 xl:px-8">
+        {/* Desktop left sticky sidebar */}
         <MarketFilterSidebar
           selectedMarkets={selectedMarkets}
           onToggleMarket={toggleMarket}
@@ -196,8 +196,8 @@ const ManufacturerView = () => {
           onResetAll={resetAllFilters}
         />
 
-        {/* Main centered content column */}
-        <div className="min-w-0 min-[1440px]:col-start-2 min-[1440px]:px-4">
+        {/* Main catalog column */}
+        <div className="min-w-0">
           {/* Breadcrumb */}
           <nav aria-label="Патека" className="mb-5 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
         <Link to="/" className="hover:text-foreground hover:underline">
@@ -495,10 +495,10 @@ const ManufacturerView = () => {
 
       {/* Loading skeleton (initial brand load only) */}
       {isLoading && !data && (
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 min-[1440px]:grid-cols-4" aria-busy="true">
           <span className="sr-only">Се вчитуваат производите…</span>
-          {Array.from({ length: 6 }).map((_, index) => (
-            <div key={index} className="h-80 animate-pulse rounded-xl border border-border bg-muted/50" />
+          {Array.from({ length: 8 }).map((_, index) => (
+            <div key={index} className="h-72 animate-pulse rounded-xl border border-border bg-muted/50" />
           ))}
         </div>
       )}
@@ -553,7 +553,7 @@ const ManufacturerView = () => {
             <div
               key={gridTransitionKey}
               aria-busy={isPlaceholderData}
-              className={`mt-4 grid grid-cols-1 gap-4 transition-opacity duration-150 motion-reduce:animate-none motion-reduce:transition-none sm:grid-cols-2 xl:grid-cols-3 ${
+              className={`mt-4 grid grid-cols-1 gap-4 transition-opacity duration-150 motion-reduce:animate-none motion-reduce:transition-none sm:grid-cols-2 xl:grid-cols-3 min-[1440px]:grid-cols-4 ${
                 isPlaceholderData ? "opacity-65" : "animate-grid-swap opacity-100"
               }`}
             >

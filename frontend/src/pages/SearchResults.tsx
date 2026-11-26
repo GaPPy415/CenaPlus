@@ -29,7 +29,7 @@ const SearchResults = () => {
   const visibleGroups = onSaleOnly ? saleGroups : (data?.data ?? []);
 
   return (
-    <div className="container max-w-6xl mx-auto px-4 py-8">
+    <div className="mx-auto w-full max-w-[1600px] px-4 py-8 sm:px-6 xl:px-8">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-heading font-extrabold text-2xl text-foreground">
@@ -95,7 +95,7 @@ const SearchResults = () => {
       )}
 
       {data && visibleGroups.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {visibleGroups.map((group) => (
             <ProductCard key={group.group_id} group={group} />
           ))}

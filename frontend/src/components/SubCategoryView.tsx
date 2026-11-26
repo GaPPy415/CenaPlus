@@ -20,7 +20,7 @@ const PER_PAGE_OPTIONS = [12, 24, 36] as const;
 
 const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState<12 | 24 | 36>(12);
+  const [perPage, setPerPage] = useState<12 | 24 | 36>(24);
   const [selectedMarkets, setSelectedMarkets] = useState<string[]>([]);
   const [onSaleOnly, setOnSaleOnly] = useState(false);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
@@ -80,15 +80,13 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
   return (
     <div className="w-full py-8">
       {/*
-        Responsive 3-column symmetric layout on wide desktop (>=1440px):
-        - Col 1 (1fr): left gutter with the sticky market sidebar centered between 0px and the cards.
-        - Col 2 (center): product header, grid, and pagination dead-center in the viewport.
-        - Col 3 (1fr): symmetric right gutter keeping Col 2 strictly centered.
-        On 1024-1439px (lg), falls back to a clean 2-column sidebar + grid layout.
-        Below 1024px, uses the compact collapsible market filter drawer.
+        Responsive 2-column catalog layout:
+        - <1024px: single column with compact mobile filter bar & drawer.
+        - >=1024px: sticky left filter sidebar + fluid product grid (2 -> 3 -> 4 cols)
+          up to max-w-[1600px] so wide monitors use screen real estate effectively.
       */}
-      <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-6 px-4 lg:max-w-7xl lg:grid-cols-[13.5rem_minmax(0,1fr)] min-[1440px]:max-w-none min-[1440px]:grid-cols-[1fr_minmax(0,62rem)_1fr] min-[1440px]:gap-0 min-[1440px]:px-0 min-[1680px]:grid-cols-[1fr_minmax(0,72rem)_1fr]">
-        {/* Desktop left sticky sidebar: centered in the left gutter on >=1440px */}
+      <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 px-4 sm:px-6 lg:grid-cols-[13.5rem_minmax(0,1fr)] xl:grid-cols-[14rem_minmax(0,1fr)] xl:gap-8 xl:px-8">
+        {/* Desktop left sticky sidebar */}
         <MarketFilterSidebar
           selectedMarkets={selectedMarkets}
           onToggleMarket={toggleMarket}
@@ -98,8 +96,8 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
           onResetAll={resetAllFilters}
         />
 
-        {/* Main centered content column */}
-        <div className="min-w-0 min-[1440px]:col-start-2 min-[1440px]:px-4">
+        {/* Main catalog column */}
+        <div className="min-w-0">
           {/* Header */}
           <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
             <div>
@@ -168,14 +166,14 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
           {/* Loading skeleton (initial category load only) */}
           {isLoading && !data && (
             <div
-              className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+              className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 min-[1440px]:grid-cols-4"
               aria-busy="true"
             >
               <span className="sr-only">Се вчитуваат производите…</span>
-              {Array.from({ length: 6 }).map((_, index) => (
+              {Array.from({ length: 8 }).map((_, index) => (
                 <div
                   key={index}
-                  className="h-80 animate-pulse rounded-xl border border-border bg-muted/50"
+                  className="h-72 animate-pulse rounded-xl border border-border bg-muted/50"
                 />
               ))}
             </div>
@@ -215,7 +213,7 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
                 <div
                   key={gridTransitionKey}
                   aria-busy={isPlaceholderData}
-                  className={`grid grid-cols-1 gap-4 transition-opacity duration-150 motion-reduce:animate-none motion-reduce:transition-none sm:grid-cols-2 xl:grid-cols-3 ${
+                  className={`grid grid-cols-1 gap-4 transition-opacity duration-150 motion-reduce:animate-none motion-reduce:transition-none sm:grid-cols-2 xl:grid-cols-3 min-[1440px]:grid-cols-4 ${
                     isPlaceholderData ? "opacity-65" : "animate-grid-swap opacity-100"
                   }`}
                 >
