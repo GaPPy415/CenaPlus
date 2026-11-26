@@ -70,7 +70,7 @@ export interface ProductDetail {
   };
 }
 
-export type SortBy = "name" | "price" | "discount" | "markets";
+export type SortBy = "name" | "price" | "discount" | "discount_amount" | "markets";
 export type SearchSortBy = "relevance" | SortBy;
 export type SortDir = "asc" | "desc";
 

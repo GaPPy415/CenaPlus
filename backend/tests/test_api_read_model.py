@@ -380,9 +380,25 @@ class ApiReadModelTests(unittest.TestCase):
         counts_asc = [len({p["market"] for p in row["products"]}) for row in mkts_asc["data"]]
         self.assertEqual(counts_asc, sorted(counts_asc))
 
-        # Discount sort runs cleanly even when few/no rows are on sale
+        # Discount % and discount amount (denars) sorts
         disc_desc = get_grouped_products(main_cat, sub_cat, page=1, per_page=12, sort="discount", order="desc")
         self.assertEqual(disc_desc["total"], price_asc["total"])
+
+        amt_desc = get_grouped_products(
+            main_cat, sub_cat, page=1, per_page=24, on_sale=True, sort="discount_amount", order="desc"
+        )
+        amts = [
+            max(
+                (p["regular_price"] - p["price"])
+                for p in row["products"]
+                if p.get("regular_price") is not None and p["price"] is not None and p["regular_price"] > p["price"]
+            )
+            for row in amt_desc["data"]
+        ]
+        self.assertEqual(amts, sorted(amts, reverse=True))
+
+        search_amt = search_products("кока кола", page=1, per_page=12, sort="discount_amount", order="desc")
+        self.assertGreaterEqual(search_amt["total"], 0)
 
 
 if __name__ == "__main__":

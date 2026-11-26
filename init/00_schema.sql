@@ -265,6 +265,12 @@ SELECT g.id AS group_id,
                THEN GREATEST(1, LEAST(99, round((1.0 - p.price::numeric / p.regular_price) * 100)::int))
            END
        ) AS max_discount_pct,
+       max(
+           CASE
+               WHEN p.regular_price IS NOT NULL AND p.price IS NOT NULL AND p.regular_price > p.price
+               THEN (p.regular_price - p.price)
+           END
+       ) AS max_discount_amount,
        json_agg(json_build_object(
            'product_id', p.id,
            'name', p.name,

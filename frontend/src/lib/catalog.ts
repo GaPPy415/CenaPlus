@@ -6,7 +6,8 @@ export type PerPageOption = (typeof PER_PAGE_OPTIONS)[number];
 export const SORT_OPTIONS: ReadonlyArray<{ value: SortBy; label: string }> = [
   { value: "name", label: "Име" },
   { value: "price", label: "Цена" },
-  { value: "discount", label: "Попуст" },
+  { value: "discount", label: "Попуст - %" },
+  { value: "discount_amount", label: "Попуст - ден." },
   { value: "markets", label: "Достапност" },
 ];
 
@@ -19,6 +20,7 @@ export const DEFAULT_SORT_DIR: Record<SortBy, SortDir> = {
   name: "asc",
   price: "asc",
   discount: "desc",
+  discount_amount: "desc",
   markets: "desc",
 };
 
@@ -30,7 +32,11 @@ export const DEFAULT_SEARCH_SORT_DIR: Record<SearchSortBy, SortDir> = {
 export const SORT_DIR_LABELS: Record<SortBy, { asc: string; desc: string }> = {
   name: { asc: "А → Ш (растечки)", desc: "Ш → А (опаѓачки)" },
   price: { asc: "Најевтини прво (растечки)", desc: "Најскапи прво (опаѓачки)" },
-  discount: { asc: "Најмал попуст прво (растечки)", desc: "Најголем попуст прво (опаѓачки)" },
+  discount: { asc: "Најмал попуст (%) прво (растечки)", desc: "Најголем попуст (%) прво (опаѓачки)" },
+  discount_amount: {
+    asc: "Најмал попуст (ден.) прво (растечки)",
+    desc: "Најголем попуст (ден.) прво (опаѓачки)",
+  },
   markets: { asc: "Најмалку продавници (растечки)", desc: "Најмногу продавници (опаѓачки)" },
 };
 
@@ -40,7 +46,13 @@ export const SEARCH_SORT_DIR_LABELS: Record<SearchSortBy, { asc: string; desc: s
 };
 
 export function isSortBy(value: string | null): value is SortBy {
-  return value === "name" || value === "price" || value === "discount" || value === "markets";
+  return (
+    value === "name" ||
+    value === "price" ||
+    value === "discount" ||
+    value === "discount_amount" ||
+    value === "markets"
+  );
 }
 
 export function isSearchSortBy(value: string | null): value is SearchSortBy {

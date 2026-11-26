@@ -93,6 +93,7 @@ class SortBy(str, Enum):
     name = "name"
     price = "price"
     discount = "discount"
+    discount_amount = "discount_amount"
     markets = "markets"
 
 
@@ -101,6 +102,7 @@ class SearchSortBy(str, Enum):
     name = "name"
     price = "price"
     discount = "discount"
+    discount_amount = "discount_amount"
     markets = "markets"
 
 
@@ -113,6 +115,7 @@ _DEFAULT_SORT_DIR: dict[SortBy, SortDir] = {
     SortBy.name: SortDir.asc,
     SortBy.price: SortDir.asc,
     SortBy.discount: SortDir.desc,
+    SortBy.discount_amount: SortDir.desc,
     SortBy.markets: SortDir.desc,
 }
 
@@ -121,6 +124,7 @@ _DEFAULT_SEARCH_SORT_DIR: dict[SearchSortBy, SortDir] = {
     SearchSortBy.name: SortDir.asc,
     SearchSortBy.price: SortDir.asc,
     SearchSortBy.discount: SortDir.desc,
+    SearchSortBy.discount_amount: SortDir.desc,
     SearchSortBy.markets: SortDir.desc,
 }
 
@@ -129,8 +133,10 @@ _ORDER_BY_SQL: dict[tuple[SortBy, SortDir], str] = {
     (SortBy.name, SortDir.desc): "group_name DESC",
     (SortBy.price, SortDir.asc): "min_price ASC NULLS LAST, group_name ASC",
     (SortBy.price, SortDir.desc): "min_price DESC NULLS LAST, group_name ASC",
-    (SortBy.discount, SortDir.desc): "max_discount_pct DESC NULLS LAST, min_price ASC NULLS LAST, group_name ASC",
-    (SortBy.discount, SortDir.asc): "max_discount_pct ASC NULLS LAST, min_price ASC NULLS LAST, group_name ASC",
+    (SortBy.discount, SortDir.desc): "max_discount_pct DESC NULLS LAST, max_discount_amount DESC NULLS LAST, min_price ASC NULLS LAST, group_name ASC",
+    (SortBy.discount, SortDir.asc): "max_discount_pct ASC NULLS LAST, max_discount_amount ASC NULLS LAST, min_price ASC NULLS LAST, group_name ASC",
+    (SortBy.discount_amount, SortDir.desc): "max_discount_amount DESC NULLS LAST, max_discount_pct DESC NULLS LAST, min_price ASC NULLS LAST, group_name ASC",
+    (SortBy.discount_amount, SortDir.asc): "max_discount_amount ASC NULLS LAST, max_discount_pct ASC NULLS LAST, min_price ASC NULLS LAST, group_name ASC",
     (SortBy.markets, SortDir.desc): "market_count DESC, min_price ASC NULLS LAST, group_name ASC",
     (SortBy.markets, SortDir.asc): "market_count ASC, min_price ASC NULLS LAST, group_name ASC",
 }
@@ -223,6 +229,7 @@ SEARCH_SQL_TEMPLATE = """
                gp.sub_category,
                gp.min_price,
                gp.max_discount_pct,
+               gp.max_discount_amount,
                gp.market_count,
                gp.products,
                matched.similarity
