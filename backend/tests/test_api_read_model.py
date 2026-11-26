@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from backend.api import (
     get_grouped_products,
+    get_main_category_products,
     get_manufacturer_products,
     get_product_detail,
     search_products,
@@ -358,7 +359,63 @@ class ApiReadModelTests(unittest.TestCase):
 
     def test_concurrent_refresh_read_views(self):
         refreshed = refresh_read_views(self.conn, concurrently=True)
-        self.assertEqual(refreshed, ["grouped_products", "manufacturer_stats"])
+        self.assertEqual(refreshed, ["grouped_products", "manufacturer_stats", "category_stats"])
+
+    def test_main_category_listing_and_subcategory_counts_parity(self):
+        main_cat = "Основни намирници"
+        markets = ["reptil", "vero"]
+
+        unfiltered = get_main_category_products(main_cat, page=1, per_page=24)
+        filtered = get_main_category_products(main_cat, page=1, per_page=24, market=markets)
+        on_sale = get_main_category_products(main_cat, page=1, per_page=24, on_sale=True)
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM groups g
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE g.main_category = %s
+                """,
+                (main_cat,),
+            )
+            expected_total = cur.fetchone()[0]
+
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM groups g
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE g.main_category = %s AND p.market = ANY(%s)
+                """,
+                (main_cat, markets),
+            )
+            expected_filtered = cur.fetchone()[0]
+
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM groups g
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE g.main_category = %s AND p.regular_price IS NOT NULL
+                """,
+                (main_cat,),
+            )
+            expected_sale = cur.fetchone()[0]
+
+        self.assertEqual(unfiltered["total"], expected_total)
+        self.assertEqual(unfiltered["category_total"], expected_total)
+        self.assertEqual(sum(s["count"] for s in unfiltered["subcategories"]), expected_total)
+        self.assertEqual(filtered["total"], expected_filtered)
+        self.assertEqual(filtered["category_total"], expected_total)
+        self.assertEqual(on_sale["total"], expected_sale)
+        for row in unfiltered["data"]:
+            self.assertEqual(set(row.keys()), EXPECTED_GROUP_KEYS)
+            self.assertEqual(row["main_category"], main_cat)
+
+        with self.assertRaises(HTTPException) as ctx:
+            get_main_category_products("__no_such_category__")
+        self.assertEqual(ctx.exception.status_code, 404)
 
     def test_sorting_options(self):
         main_cat = "Дом и домаќинство"

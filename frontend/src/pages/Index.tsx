@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom";
-import { CATEGORIES, CATEGORY_ICONS } from "@/lib/categories";
+import { CATEGORIES } from "@/lib/categories";
 import SubCategoryView from "@/components/SubCategoryView";
 import { CategoryCard } from "@/components/CategoryCard";
 
@@ -8,7 +8,7 @@ const Index = () => {
   const selectedMain = searchParams.get("category");
   const selectedSub = searchParams.get("sub");
 
-  if (selectedMain && selectedSub) {
+  if (selectedMain) {
     return <SubCategoryView mainCategory={selectedMain} subCategory={selectedSub} />;
   }
 

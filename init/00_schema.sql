@@ -305,6 +305,11 @@ CREATE INDEX IF NOT EXISTS idx_grouped_products_category_name
     ON public.grouped_products USING btree (main_category, sub_category, group_name)
     INCLUDE (markets, on_sale, sale_markets);
 
+-- /{main} hot path: pure ordered range scan across all subcategories of one main category
+CREATE INDEX IF NOT EXISTS idx_grouped_products_main_category_name
+    ON public.grouped_products USING btree (main_category, group_name)
+    INCLUDE (sub_category, markets, on_sale, sale_markets);
+
 -- O(1) manufacturer header stats (groups, categories, markets, subcategories)
 CREATE MATERIALIZED VIEW IF NOT EXISTS public.manufacturer_stats AS
 WITH visible_groups AS (
@@ -370,7 +375,34 @@ WITH DATA;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_manufacturer_stats_manufacturer_id
     ON public.manufacturer_stats USING btree (manufacturer_id);
 
+-- O(1) category header stats (total groups + per-subcategory counts)
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.category_stats AS
+WITH sub_counts AS (
+    SELECT main_category,
+           sub_category,
+           count(*)::int AS count
+    FROM public.grouped_products
+    WHERE main_category IS NOT NULL AND sub_category IS NOT NULL
+    GROUP BY main_category, sub_category
+)
+SELECT main_category,
+       sum(count)::int AS total,
+       jsonb_agg(
+           jsonb_build_object(
+               'sub_category', sub_category,
+               'count', count
+           )
+           ORDER BY sub_category ASC
+       ) AS subcategories
+FROM sub_counts
+GROUP BY main_category
+WITH DATA;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_category_stats_main_category
+    ON public.category_stats USING btree (main_category);
+
 ANALYZE public.products;
 ANALYZE public.groups;
 ANALYZE public.grouped_products;
 ANALYZE public.manufacturer_stats;
+ANALYZE public.category_stats;

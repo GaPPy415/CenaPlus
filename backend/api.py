@@ -616,6 +616,130 @@ def get_product_detail(g_id: str = Query(..., description="Group id (uuid)")):
     }
 
 
+def _list_category_products(
+    main_category: str,
+    sub_category: str | None,
+    *,
+    page: int | object,
+    per_page: PerPage | int | object,
+    market: list[str] | None | object,
+    on_sale: bool | object,
+    sort: SortBy | str | object,
+    order: SortDir | str | None | object,
+) -> dict:
+    if main_category not in CATEGORIES:
+        raise HTTPException(404, "Main category not found")
+    if sub_category is not None and sub_category not in CATEGORIES[main_category]:
+        raise HTTPException(404, "Sub-category not found")
+
+    page_value = max(1, int(_unwrap_param(page)))
+    raw_per_page = _unwrap_param(per_page)
+    per_page_value = int(getattr(raw_per_page, "value", raw_per_page))
+    offset = per_page_value * (page_value - 1)
+    raw_markets = _unwrap_param(market)
+    active_markets = (
+        [m for m in raw_markets if (m or "").strip()]
+        if isinstance(raw_markets, (list, tuple))
+        else []
+    )
+    only_on_sale = _unwrap_param(on_sale) is True
+    order_by_sql = _resolve_order_by(sort, order)
+
+    base_clauses = ["main_category = %s"]
+    base_params: list = [main_category]
+    if sub_category is not None:
+        base_clauses.append("sub_category = %s")
+        base_params.append(sub_category)
+
+    where_sql, filter_params = _build_listing_filters(
+        base_clauses,
+        base_params,
+        markets=active_markets,
+        on_sale=only_on_sale,
+    )
+
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT total, subcategories
+            FROM category_stats
+            WHERE main_category = %s
+            """,
+            (main_category,),
+        )
+        stats = cur.fetchone()
+        category_total = int(stats["total"]) if stats else 0
+        counts_by_sub = {
+            item["sub_category"]: int(item["count"])
+            for item in (stats["subcategories"] if stats and stats["subcategories"] else [])
+        }
+        subcategories = [
+            {"sub_category": sc, "count": counts_by_sub.get(sc, 0)}
+            for sc in CATEGORIES[main_category]
+        ]
+
+        precomputed_total: int | None = None
+        if not active_markets and not only_on_sale:
+            precomputed_total = (
+                category_total if sub_category is None else counts_by_sub.get(sub_category, 0)
+            )
+
+        if precomputed_total == 0:
+            rows = []
+            total = 0
+        else:
+            cur.execute(
+                f"""
+                SELECT group_id, group_name, main_category, sub_category, products
+                FROM grouped_products
+                WHERE {where_sql}
+                ORDER BY {order_by_sql}
+                LIMIT %s OFFSET %s
+                """,
+                (*filter_params, per_page_value, offset),
+            )
+            rows = cur.fetchall()
+            if precomputed_total is not None:
+                total = precomputed_total
+            else:
+                cur.execute(
+                    f"SELECT COUNT(*) FROM grouped_products WHERE {where_sql}",
+                    filter_params,
+                )
+                total = cur.fetchone()["count"]
+
+    return {
+        "total": total,
+        "category_total": category_total,
+        "subcategories": subcategories,
+        "page": page_value,
+        "per_page": per_page_value,
+        "data": rows,
+    }
+
+
+@app.get("/{main_category}")
+def get_main_category_products(
+    main_category: str,
+    page: int = Query(1, ge=1),
+    per_page: PerPage = Query(PerPage.twelve),
+    market: list[str] = Query(None),
+    on_sale: bool = Query(False),
+    sort: SortBy = Query(SortBy.name),
+    order: SortDir | None = Query(None),
+):
+    return _list_category_products(
+        main_category,
+        None,
+        page=page,
+        per_page=per_page,
+        market=market,
+        on_sale=on_sale,
+        sort=sort,
+        order=order,
+    )
+
+
 @app.get("/{main_category}/{sub_category}")
 def get_grouped_products(
     main_category: str,
@@ -627,45 +751,13 @@ def get_grouped_products(
     sort: SortBy = Query(SortBy.name),
     order: SortDir | None = Query(None),
 ):
-    if main_category not in CATEGORIES:
-        raise HTTPException(404, "Main category not found")
-    if sub_category not in CATEGORIES[main_category]:
-        raise HTTPException(404, "Sub-category not found")
-
-    per_page_value = int(getattr(per_page, "value", per_page))
-    offset = per_page_value * (page - 1)
-    raw_markets = market if isinstance(market, (list, tuple)) else []
-    active_markets = [m for m in raw_markets if (m or "").strip()]
-    only_on_sale = on_sale is True
-    order_by_sql = _resolve_order_by(sort, order)
-
-    where_sql, filter_params = _build_listing_filters(
-        ["main_category = %s", "sub_category = %s"],
-        [main_category, sub_category],
-        markets=active_markets,
-        on_sale=only_on_sale,
+    return _list_category_products(
+        main_category,
+        sub_category,
+        page=page,
+        per_page=per_page,
+        market=market,
+        on_sale=on_sale,
+        sort=sort,
+        order=order,
     )
-    with get_cursor() as cur:
-        cur.execute(
-            f"""
-            SELECT group_id, group_name, main_category, sub_category, products
-            FROM grouped_products
-            WHERE {where_sql}
-            ORDER BY {order_by_sql}
-            LIMIT %s OFFSET %s
-            """,
-            (*filter_params, per_page_value, offset),
-        )
-        rows = cur.fetchall()
-        cur.execute(
-            f"SELECT COUNT(*) FROM grouped_products WHERE {where_sql}",
-            filter_params,
-        )
-        total = cur.fetchone()["count"]
-
-    return {
-        "total": total,
-        "page": page,
-        "per_page": per_page_value,
-        "data": rows,
-    }

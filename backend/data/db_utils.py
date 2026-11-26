@@ -144,7 +144,7 @@ def mark_out_of_stock_products_table(
     return len(ids_to_update)
 
 
-READ_MODEL_MATVIEWS = ("grouped_products", "manufacturer_stats")
+READ_MODEL_MATVIEWS = ("grouped_products", "manufacturer_stats", "category_stats")
 
 
 def refresh_read_views(

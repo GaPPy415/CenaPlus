@@ -74,17 +74,30 @@ export type SortBy = "name" | "price" | "discount" | "discount_amount" | "market
 export type SearchSortBy = "relevance" | SortBy;
 export type SortDir = "asc" | "desc";
 
+export interface CategorySubCount {
+  sub_category: string;
+  count: number;
+}
+
+export interface CategoryProductsResponse extends ProductsResponse {
+  category_total: number;
+  subcategories: CategorySubCount[];
+}
+
 export async function fetchProducts(
   mainCategory: string,
-  subCategory: string,
+  subCategory: string | null,
   page = 1,
   perPage: 12 | 24 | 36 = 24,
   markets: string[] = [],
   onSale = false,
   sort: SortBy = "name",
   order: SortDir = "asc"
-): Promise<ProductsResponse> {
-  let url = `${API_BASE}/${encodeURIComponent(mainCategory)}/${encodeURIComponent(subCategory)}?page=${page}&per_page=${perPage}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}`;
+): Promise<CategoryProductsResponse> {
+  const path = subCategory
+    ? `${encodeURIComponent(mainCategory)}/${encodeURIComponent(subCategory)}`
+    : encodeURIComponent(mainCategory);
+  let url = `${API_BASE}/${path}?page=${page}&per_page=${perPage}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}`;
   for (const m of markets) {
     url += `&market=${encodeURIComponent(m)}`;
   }

@@ -42,7 +42,9 @@ const Header = () => {
               <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
               <Link
                 to={`/?category=${encodeURIComponent(mainCat)}`}
-                className="min-w-0 truncate text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                className={`min-w-0 truncate text-sm font-medium transition-colors ${
+                  subCat ? "text-muted-foreground hover:text-foreground" : "text-foreground"
+                }`}
               >
                 {mainCat}
               </Link>
