@@ -70,7 +70,8 @@ def parse_product(item: dict) -> ScrapedProduct:
 def fetch_page(page: int) -> list[dict]:
     url = f"{BASE_URL}?per_page={PER_PAGE}&page={page}"
     print(f"Fetching page: {page}")
-    response = requests.get(url)
+    response = requests.get(url, timeout=(10, 30))
+    response.raise_for_status()
     raw = response.text
     json_start = min(
         raw.index('{') if '{' in raw else len(raw),
@@ -81,6 +82,7 @@ def fetch_page(page: int) -> list[dict]:
 
 class ReptilScraper(MarketScraper):
     market = MARKET_NAME
+    probe_url = f"{BASE_URL}?per_page=1&page=1"
     # Last category entry wins, as in the original scraper.
     keep_in_stock_on_duplicate = False
 
@@ -88,7 +90,7 @@ class ReptilScraper(MarketScraper):
         response = requests.get(
             WP_PRODUCT_URL,
             params={"per_page": 1, "orderby": "modified", "order": "desc"},
-            timeout=30,
+            timeout=(10, 30),
         )
         response.raise_for_status()
         items = response.json()
@@ -100,7 +102,7 @@ class ReptilScraper(MarketScraper):
 
     def fetch(self) -> list[ScrapedProduct]:
         url = f"{BASE_URL}?per_page={PER_PAGE}&page=1"
-        response = requests.get(url)
+        response = requests.get(url, timeout=(10, 30))
         response.raise_for_status()
         total_pages = int(response.headers.get('X-WP-TotalPages', 1))
         print(f"Total pages to scrape: {total_pages}")

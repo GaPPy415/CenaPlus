@@ -61,7 +61,7 @@ def parse_product(product: dict) -> ScrapedProduct:
 def fetch_page(page: int) -> list[dict]:
     url = f"{BASE_URL}?per_page={PER_PAGE}&page={page}"
     print(f"Fetching page: {page}")
-    response = requests.get(url)
+    response = requests.get(url, timeout=(10, 45))
     response.raise_for_status()
 
     raw = response.text
@@ -75,12 +75,13 @@ def fetch_page(page: int) -> list[dict]:
 
 class BigshopScraper(MarketScraper):
     market = MARKET_NAME
+    probe_url = f"{BASE_URL}?per_page=1&page=1"
     # Last category entry wins, as in the original scraper.
     keep_in_stock_on_duplicate = False
 
     def fetch(self) -> list[ScrapedProduct]:
         url = f"{BASE_URL}?per_page={PER_PAGE}&page=1"
-        response = requests.get(url, timeout=45)
+        response = requests.get(url, timeout=(10, 45))
         response.raise_for_status()
         total_pages = int(response.headers.get('X-WP-TotalPages', 1))
         print(f"Total pages to scrape: {total_pages}")

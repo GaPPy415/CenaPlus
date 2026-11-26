@@ -97,7 +97,7 @@ def parse_price(value) -> int | None:
 
 
 def get_skopje_markets() -> list[dict]:
-    response = SESSION.get(API_URL, timeout=60)
+    response = SESSION.get(API_URL, timeout=(10, 60))
     response.raise_for_status()
     markets = response.json().get("data") or []
     return [m for m in markets if (m.get("city") or "").strip().lower() == CITY.lower()]
@@ -107,7 +107,7 @@ def fetch_page(market_id: int, page: int) -> list[dict]:
     response = SESSION.get(
         f"{API_URL}/{market_id}/products",
         params={"page": page, "per_page": PER_PAGE},
-        timeout=120,
+        timeout=(10, 120),
     )
     response.raise_for_status()
     return response.json().get("data") or []
@@ -134,6 +134,8 @@ def parse_row(row: dict) -> ScrapedProduct | None:
 
 class SparScraper(MarketScraper):
     market = MARKET_NAME
+    probe_url = API_URL
+    probe_headers = dict(SESSION.headers)
     # A product is in stock for the market if any Skopje store carries it.
     keep_in_stock_on_duplicate = True
     #: 89% of the catalogue is flagged unavailable in a given store. Ingesting
@@ -157,7 +159,7 @@ class SparScraper(MarketScraper):
         first = SESSION.get(
             f"{API_URL}/{market_id}/products",
             params={"page": 1, "per_page": PER_PAGE},
-            timeout=120,
+            timeout=(10, 120),
         )
         first.raise_for_status()
         payload = first.json()

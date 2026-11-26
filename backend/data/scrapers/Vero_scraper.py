@@ -29,7 +29,7 @@ MARKET_NAME = 'vero'
 def fetch_page(page_link: str) -> tuple[int | None, bytes | None]:
     """GET one page; returns (status, body) or (None, None) on a network error."""
     try:
-        page = SESSION.get(page_link, timeout=15)
+        page = SESSION.get(page_link, timeout=(10, 20))
         return page.status_code, page.content
     except requests.RequestException as e:
         print(f"Error fetching {page_link}: {e}")
@@ -108,9 +108,10 @@ def scrape_shop(shop_link: str) -> list[ScrapedProduct]:
 
 class VeroScraper(MarketScraper):
     market = MARKET_NAME
+    probe_url = BASE_URL + "index.html"
 
     def get_source_marker(self) -> str | None:
-        index_page = SESSION.get(BASE_URL + "index.html", timeout=30)
+        index_page = SESSION.get(BASE_URL + "index.html", timeout=(10, 30))
         index_page.raise_for_status()
         soup = BeautifulSoup(index_page.content, "html.parser")
         first_href = next(
@@ -123,7 +124,7 @@ class VeroScraper(MarketScraper):
         )
         if not first_href:
             return None
-        page = SESSION.get(BASE_URL + first_href, timeout=30)
+        page = SESSION.get(BASE_URL + first_href, timeout=(10, 30))
         page.raise_for_status()
         text = BeautifulSoup(page.content, "html.parser").get_text(" ", strip=True)
         match = _UPDATED_RE.search(text)
@@ -132,7 +133,7 @@ class VeroScraper(MarketScraper):
         return page.headers.get("Last-Modified")
 
     def fetch(self) -> list[ScrapedProduct]:
-        index_page = SESSION.get(BASE_URL + "index.html")
+        index_page = SESSION.get(BASE_URL + "index.html", timeout=(10, 30))
         index_page.raise_for_status()
         soup = BeautifulSoup(index_page.content, 'html.parser')
 

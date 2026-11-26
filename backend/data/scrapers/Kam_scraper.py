@@ -111,7 +111,7 @@ numbers_skopje = [1, 3, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 17, 19, 20, 27, 31, 3
 MARKET_NAME = 'kam'
 
 
-def download_pdf(url: str, timeout: int = 30) -> str | None:
+def download_pdf(url: str, timeout: tuple[int, int] = (10, 30)) -> str | None:
     filename = url.split('/')[-1]
     try:
         r = requests.get(url, headers=headers, timeout=timeout)
@@ -131,6 +131,8 @@ def merge_products(dest: dict, new: dict) -> None:
 
 class KamScraper(MarketScraper):
     market = MARKET_NAME
+    probe_url = "https://kam.com.mk/"
+    probe_headers = headers
 
     def fetch(self) -> list[ScrapedProduct]:
         start = time.time()

@@ -39,7 +39,7 @@ _COUNT_RE = re.compile(r"од\s+([\d.,]+)\s+артикли")
 
 
 def get_soup(url: str) -> BeautifulSoup:
-    response = SESSION.get(url, timeout=30)
+    response = SESSION.get(url, timeout=(10, 30))
     response.raise_for_status()
     return BeautifulSoup(response.content, "html.parser")
 
@@ -99,6 +99,9 @@ class ProverkanaceniScraper(MarketScraper):
     #: Stores scraped concurrently (each store also threads its pages).
     market_workers: int = 8
     page_workers: int = 8
+
+    def get_probe_url(self) -> str | None:
+        return self.base_url or None
 
     def scrape_page(self, org_id: int, page_num: int) -> list[ScrapedProduct]:
         url = f"{self.base_url}?page={page_num}&perPage=10000&search=&org={org_id}"

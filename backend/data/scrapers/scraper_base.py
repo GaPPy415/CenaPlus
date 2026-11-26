@@ -40,6 +40,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Iterable
 
+import requests
+
 from backend.data.db_utils import (
     connect_to_db,
     get_products_by_market,
@@ -98,6 +100,15 @@ class MarketScraper(ABC):
     #: downed site. With ``True`` the scraper returns a failure status and
     #: leaves the DB untouched instead of marking the whole market out of stock.
     abort_on_empty: bool = True
+
+    #: Optional URL probed with a short (connect, read) timeout before scraping.
+    #: If the probe fails or returns 5xx, ``run()`` skips the market immediately
+    #: without spawning worker pools or touching the database.
+    probe_url: str | None = None
+    probe_timeout: tuple[int, int] = (10, 15)
+    probe_headers: dict[str, str] = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CenaPlus/1.0"
+    }
 
     @abstractmethod
     def fetch(self) -> Iterable[ScrapedProduct]:
@@ -171,6 +182,33 @@ class MarketScraper(ABC):
             )
         return rows
 
+    def get_probe_url(self) -> str | None:
+        """URL to test reachability before scraping. Return ``None`` to skip probing."""
+        return self.probe_url
+
+    def check_reachable(self) -> bool:
+        """Fast-fail connectivity check so a downed site doesn't hang the pipeline."""
+        url = self.get_probe_url()
+        if not url:
+            return True
+        try:
+            with requests.get(
+                url,
+                headers=self.probe_headers,
+                timeout=self.probe_timeout,
+                stream=True,
+            ) as response:
+                if response.status_code >= 500:
+                    print(
+                        f"[{self.market}] site unavailable (HTTP {response.status_code}) "
+                        f"at {url}; skipping scrape"
+                    )
+                    return False
+            return True
+        except requests.RequestException as exc:
+            print(f"[{self.market}] site unreachable ({exc}) at {url}; skipping scrape")
+            return False
+
     def get_source_marker(self) -> str | None:
         """Optional lightweight freshness fingerprint (e.g. site 'last updated' timestamp).
 
@@ -193,6 +231,9 @@ class MarketScraper(ABC):
             raise ValueError(f"{type(self).__name__}.market is not set")
         start = time.time()
         force = force or os.getenv("CENAPLUS_FORCE_SCRAPE") == "1"
+
+        if not self.check_reachable():
+            return 1
 
         source_marker = self._safe_get_source_marker()
         if source_marker and not force:

@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import subprocess
+import threading
 import time
 from pathlib import Path
 from datetime import datetime
@@ -11,6 +12,7 @@ from typing import List, Dict, Any
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 PARTIAL_FAILURE_EXIT_CODE = 3
+DEFAULT_TIMEOUT_SECONDS = 900  # 15 minutes per scraper safety net
 
 
 def timestamp() -> str:
@@ -22,7 +24,13 @@ def find_scraper_scripts(scraper_dir: Path) -> List[Path]:
     return scripts
 
 
-def run_script(script_path: Path, logs_dir: Path, stream: bool = True, force: bool = False) -> Dict[str, Any]:
+def run_script(
+    script_path: Path,
+    logs_dir: Path,
+    stream: bool = True,
+    force: bool = False,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> Dict[str, Any]:
     start = time.perf_counter()
     log_path = logs_dir / f"{script_path.stem}-{timestamp()}.log"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +66,9 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True, force: bo
         if force:
             env["CENAPLUS_FORCE_SCRAPE"] = "1"
 
+        timed_out = threading.Event()
+        timer: threading.Timer | None = None
+        proc: subprocess.Popen | None = None
         try:
             proc = subprocess.Popen(
                 [sys.executable, str(script_path)],
@@ -69,19 +80,43 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True, force: bo
                 encoding="utf-8",
                 errors="replace",
             )
+            if timeout_seconds and timeout_seconds > 0:
+                def _kill_stuck():
+                    timed_out.set()
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+
+                timer = threading.Timer(timeout_seconds, _kill_stuck)
+                timer.daemon = True
+                timer.start()
+
             assert proc.stdout is not None
             for line in proc.stdout:
                 log.write(line)
                 if stream:
                     print(f"[{script_path.name}] {line}", end="")
             proc.wait()
-            exit_code = proc.returncode
+            if timed_out.is_set():
+                exit_code = 124
+                msg = f"TIMEOUT: killed {script_path.name} after {timeout_seconds}s\n"
+                log.write(msg)
+                if stream:
+                    print(f"[{script_path.name}] {msg}", end="")
+            else:
+                exit_code = proc.returncode
         except Exception as e:
             exit_code = 1
             err = f"Exception while running {script_path.name}: {e}\n"
             log.write(err)
             if stream:
                 print(f"[{script_path.name}] {err}", end="")
+        finally:
+            if timer is not None:
+                timer.cancel()
+            if proc is not None and proc.stdout is not None:
+                proc.stdout.close()
 
     end = time.perf_counter()
     duration = round(end - start, 2)
@@ -89,18 +124,24 @@ def run_script(script_path: Path, logs_dir: Path, stream: bool = True, force: bo
     result["end"] = datetime.now().isoformat(timespec="seconds")
     result["duration_seconds"] = duration
     result["exit_code"] = exit_code
-    result["status"] = "passed" if exit_code == 0 else "failed"
+    result["status"] = "timeout" if timed_out.is_set() else ("passed" if exit_code == 0 else "failed")
     return result
 
 
-def run_parallel(scripts: List[Path], logs_dir: Path, max_workers: int, force: bool = False) -> List[Dict[str, Any]]:
+def run_parallel(
+    scripts: List[Path],
+    logs_dir: Path,
+    max_workers: int,
+    force: bool = False,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> List[Dict[str, Any]]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     results: List[Dict[str, Any]] = []
     print(f"Running {len(scripts)} scripts in parallel with {max_workers} workers...")
 
     def _runner(p: Path) -> Dict[str, Any]:
-        return run_script(p, logs_dir, stream=False, force=force)
+        return run_script(p, logs_dir, stream=False, force=force, timeout_seconds=timeout_seconds)
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         fut_to_script = {ex.submit(_runner, p): p for p in scripts}
@@ -133,6 +174,12 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="List scripts without executing")
     parser.add_argument("--no-refresh", action="store_true", help="Skip refreshing API materialized views after scraping")
     parser.add_argument("--force", action="store_true", help="Ignore source freshness markers and scrape every market")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help="Max seconds per scraper before killing it (0 = no limit)",
+    )
     args = parser.parse_args()
 
     scraper_dir = Path(args.scrapers_dir).resolve()
@@ -158,11 +205,23 @@ def main() -> int:
     summary: List[Dict[str, Any]] = []
 
     if args.parallel and args.parallel > 1:
-        summary = run_parallel(scripts, logs_dir, max_workers=args.parallel, force=args.force)
+        summary = run_parallel(
+            scripts,
+            logs_dir,
+            max_workers=args.parallel,
+            force=args.force,
+            timeout_seconds=args.timeout,
+        )
     else:
         print("Running sequentially...")
         for p in scripts:
-            res = run_script(p, logs_dir, stream=True, force=args.force)
+            res = run_script(
+                p,
+                logs_dir,
+                stream=True,
+                force=args.force,
+                timeout_seconds=args.timeout,
+            )
             summary.append(res)
             print(f"--> {p.name}: {res['status']} in {res['duration_seconds']}s (log: {res['log_file']})")
 

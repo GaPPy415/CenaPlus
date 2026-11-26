@@ -80,7 +80,7 @@ def parse_row(cells) -> ScrapedProduct | None:
 
 def get_org_ids(index_url: str) -> list[str]:
     """Store ids from the market selector on the price-list page."""
-    response = SESSION.get(index_url, timeout=30)
+    response = SESSION.get(index_url, timeout=(10, 30))
     response.raise_for_status()
     soup = BeautifulSoup(response.content, "html.parser")
     select = soup.find("select", id="org-list")
@@ -97,10 +97,13 @@ class ZurPlatformScraper(MarketScraper):
     #: `action` value of the AJAX endpoint, e.g. "load_prices_data".
     ajax_action: str = ""
 
+    def get_probe_url(self) -> str | None:
+        return self.index_url or None
+
     def get_source_marker(self) -> str | None:
         if not self.index_url:
             return None
-        response = SESSION.get(self.index_url, timeout=30)
+        response = SESSION.get(self.index_url, timeout=(10, 30))
         response.raise_for_status()
         text = BeautifulSoup(response.content, "html.parser").get_text(" ", strip=True)
         match = _UPDATED_RE.search(text)
@@ -123,7 +126,7 @@ class ZurPlatformScraper(MarketScraper):
                     "limit": PER_PAGE,
                 },
                 headers={"Referer": self.index_url},
-                timeout=120,
+                timeout=(10, 120),
             )
             response.raise_for_status()
             payload = response.json()

@@ -24,6 +24,7 @@ __pycache__/
 
 # Local scratch
 nul
+TODO.txt
 tamaro_products.json
 backend/data/grouper_new.py
 backend/data/ungrouped.py

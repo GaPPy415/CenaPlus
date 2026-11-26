@@ -109,7 +109,7 @@ def get_skopje_stores() -> list[dict]:
                 "page": page,
                 "_fields": "id,title,link",
             },
-            timeout=60,
+            timeout=(10, 60),
         )
         response.raise_for_status()
         batch = response.json()
@@ -134,7 +134,7 @@ def fetch_store(store: dict) -> list[ScrapedProduct]:
             "length": MAX_PRODUCTS,
             "search[value]": "",
         },
-        timeout=240,
+        timeout=(10, 240),
     )
     response.raise_for_status()
     payload = response.json()
@@ -150,18 +150,20 @@ def fetch_store(store: dict) -> list[ScrapedProduct]:
 
 class KipperScraper(MarketScraper):
     market = MARKET_NAME
+    probe_url = f"{POSTS_URL}?categories={CITY_TERM}&per_page=1&page=1&_fields=id"
+    probe_headers = dict(SESSION.headers)
 
     def get_source_marker(self) -> str | None:
         response = SESSION.get(
             POSTS_URL,
             params={"categories": CITY_TERM, "per_page": 1, "page": 1, "_fields": "id,link"},
-            timeout=30,
+            timeout=(10, 30),
         )
         response.raise_for_status()
         stores = response.json()
         if not isinstance(stores, list) or not stores or not stores[0].get("link"):
             return None
-        page = SESSION.get(stores[0]["link"], timeout=30)
+        page = SESSION.get(stores[0]["link"], timeout=(10, 30))
         page.raise_for_status()
         text = BeautifulSoup(page.content, "html.parser").get_text(" ", strip=True)
         match = _UPDATED_RE.search(text)

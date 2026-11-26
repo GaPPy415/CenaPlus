@@ -1,5 +1,6 @@
 """Рамстор — per-store HTML price tables (ramstore.com.mk) parsed with pandas."""
 
+import io
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -80,7 +81,13 @@ def extract_dates(period):
 
 def scrape_store(store: str) -> list[ScrapedProduct]:
     """Parse one store page into products."""
-    df_new = pd.read_html(store)[0]
+    response = requests.get(
+        store,
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=(10, 60),
+    )
+    response.raise_for_status()
+    df_new = pd.read_html(io.StringIO(response.text))[0]
     store_id = store.rsplit('_', 1)[0].split('marketi/')[1].replace('/', '')
     df_new["storeId"] = store_id
 
@@ -128,6 +135,7 @@ def scrape_store(store: str) -> list[ScrapedProduct]:
 
 class RamstoreScraper(MarketScraper):
     market = MARKET_NAME
+    probe_url = stores[0] if stores else None
 
     def get_source_marker(self) -> str | None:
         if not stores:
@@ -136,7 +144,7 @@ class RamstoreScraper(MarketScraper):
         with requests.get(
             stores[0],
             headers={"User-Agent": "Mozilla/5.0"},
-            timeout=30,
+            timeout=(10, 30),
             stream=True,
         ) as response:
             response.raise_for_status()

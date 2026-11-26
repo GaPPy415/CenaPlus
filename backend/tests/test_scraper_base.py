@@ -5,9 +5,15 @@ Run from the repo root::
     python -m unittest discover -s backend/tests -t .
 """
 
+import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import requests
+
+from backend.data.run_scrapers import run_script
 from backend.data.scrapers.scraper_base import MarketScraper, ScrapedProduct
 
 
@@ -135,6 +141,52 @@ class EmptyRunTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             NoMarket().run()
+
+
+class ReachabilityAndWatchdogTests(unittest.TestCase):
+    def test_unreachable_probe_skips_fetch_and_returns_1(self):
+        fetch_called = False
+
+        class DownScraper(MarketScraper):
+            market = "down"
+            probe_url = "https://example.invalid/"
+
+            def fetch(self):
+                nonlocal fetch_called
+                fetch_called = True
+                return [ScrapedProduct(name="X", price=10)]
+
+        with patch("backend.data.scrapers.scraper_base.requests.get", side_effect=requests.Timeout("hang")):
+            self.assertEqual(DownScraper().run(), 1)
+        self.assertFalse(fetch_called)
+
+    def test_5xx_probe_skips_fetch_and_returns_1(self):
+        fetch_called = False
+
+        class ServerErrorScraper(MarketScraper):
+            market = "err503"
+            probe_url = "https://example.invalid/"
+
+            def fetch(self):
+                nonlocal fetch_called
+                fetch_called = True
+                return [ScrapedProduct(name="X", price=10)]
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 503
+        fake_resp.__enter__.return_value = fake_resp
+        with patch("backend.data.scrapers.scraper_base.requests.get", return_value=fake_resp):
+            self.assertEqual(ServerErrorScraper().run(), 1)
+        self.assertFalse(fetch_called)
+
+    def test_run_script_kills_hanging_scraper_on_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            script = tmp_path / "hang_scraper.py"
+            script.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+            result = run_script(script, tmp_path / "logs", stream=False, timeout_seconds=1)
+            self.assertEqual(result["status"], "timeout")
+            self.assertEqual(result["exit_code"], 124)
 
 
 if __name__ == "__main__":
