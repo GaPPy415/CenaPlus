@@ -111,6 +111,10 @@ platform (store selector + `admin-ajax.php` table). A market on that platform is
 (store selector + 100-row HTML tables). A market is `market`, `base_url` and optional worker counts, as
 in `Zito_scraper.py` / `Stokomak_scraper.py` / `Elida_scraper.py`.
 
+`woocommerce_platform.py` — `WooCommerceScraper` implements `/wp-json/wc/store/v1/products` with
+PHP-warning JSON stripping and single-fetch page 1, shared by `Reptil_scraper.py` and
+`Bigshop_scraper_maintenance.py`.
+
 `Spar_scraper.py` is API-only (no HTML): markets and 500-row product pages from
 `api.prod.spar.mk/api/pricelists-web`. It also owns the ASCII→Cyrillic transliteration of the ERP's
 names (`to_cyrillic`), which the other scrapers do not need.

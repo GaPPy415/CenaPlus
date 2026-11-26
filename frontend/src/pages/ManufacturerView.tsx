@@ -20,28 +20,13 @@ import {
   type PerPageOption,
 } from "@/lib/catalog";
 import { PerPageControl, SortControl } from "@/components/CatalogControls";
-import CatalogGrid from "@/components/CatalogGrid";
-import {
-  MarketFilterActivePills,
-  MarketFilterMobileButton,
-  MarketFilterMobileDrawer,
-  MarketFilterSidebar,
-  OnSaleFilterButton,
-} from "@/components/MarketFilter";
+import CatalogShell from "@/components/CatalogShell";
+import { MarketFilterMobileButton, OnSaleFilterButton } from "@/components/MarketFilter";
 import { fetchManufacturer, type SortBy, type SortDir } from "@/lib/api";
+import { formatDateTime } from "@/lib/utils";
 
 const subCategoryKey = (mainCategory: string, subCategory: string) =>
   `${mainCategory}::${subCategory}`;
-
-const formatDateTime = (value: string | null) => {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
-};
 
 const ManufacturerView = () => {
   const [params, setParams] = useSearchParams();
@@ -206,19 +191,40 @@ const ManufacturerView = () => {
   }
 
   return (
-    <main className="w-full py-8">
-      <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 px-4 sm:px-6 lg:grid-cols-[13.5rem_minmax(0,1fr)] xl:grid-cols-[14rem_minmax(0,1fr)] xl:gap-8 xl:px-8">
-        <MarketFilterSidebar
-          selectedMarkets={selectedMarkets}
-          onToggleMarket={toggleMarket}
-          onResetMarkets={() => setListParam("market", [])}
-          onSaleOnly={onSaleOnly}
-          onToggleOnSale={toggleOnSale}
-          onResetAll={resetSidebarFilters}
-        />
-
-        <div className="min-w-0">
-          {/* Breadcrumb */}
+    <CatalogShell
+      selectedMarkets={selectedMarkets}
+      onToggleMarket={toggleMarket}
+      onResetMarkets={() => setListParam("market", [])}
+      onSaleOnly={onSaleOnly}
+      onToggleOnSale={toggleOnSale}
+      onResetSidebarFilters={resetSidebarFilters}
+      mobileMarketsOpen={mobileMarketsOpen}
+      mobilePanelId="manufacturer-mobile-markets-panel"
+      pillsClassName="mt-3"
+      drawerOpenMarginClass="mt-3"
+      items={data?.data}
+      isLoading={isLoading}
+      isError={isError}
+      isPlaceholderData={isPlaceholderData}
+      filterKey={filterKey}
+      page={page}
+      totalPages={totalPages}
+      onPageChange={(next) => updateParams({ page: String(next) }, true)}
+      showCategory
+      gridClassName="mt-4"
+      emptyMessage={
+        onSaleOnly
+          ? "Моментално нема производи на акција за избраните филтри."
+          : hasAnyFilter
+            ? "Нема производи за избраните филтри од овој производител."
+            : "Нема производи од овој производител во моментов."
+      }
+      onResetAllFilters={hasAnyFilter ? resetAllFilters : undefined}
+      errorTitle="Не можевме да ги вчитаме производите"
+      errorDescription="Проверете дали API серверот е активен, или производителот повеќе не постои."
+      onRetry={() => refetch()}
+    >
+      {/* Breadcrumb */}
           <nav
             aria-label="Патека"
             className="mb-5 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground"
@@ -491,49 +497,7 @@ const ManufacturerView = () => {
               </div>
             </div>
           )}
-
-          <MarketFilterActivePills
-            open={mobileMarketsOpen}
-            selectedMarkets={selectedMarkets}
-            onToggleMarket={toggleMarket}
-            onResetMarkets={() => setListParam("market", [])}
-            className="mt-3"
-          />
-          <MarketFilterMobileDrawer
-            open={mobileMarketsOpen}
-            panelId="manufacturer-mobile-markets-panel"
-            selectedMarkets={selectedMarkets}
-            onToggleMarket={toggleMarket}
-            onResetMarkets={() => setListParam("market", [])}
-            openMarginClass="mt-3"
-          />
-
-          <CatalogGrid
-            items={data?.data}
-            isLoading={isLoading}
-            isError={isError}
-            isPlaceholderData={isPlaceholderData}
-            filterKey={filterKey}
-            page={page}
-            totalPages={totalPages}
-            onPageChange={(next) => updateParams({ page: String(next) }, true)}
-            showCategory
-            className="mt-4"
-            emptyMessage={
-              onSaleOnly
-                ? "Моментално нема производи на акција за избраните филтри."
-                : hasAnyFilter
-                  ? "Нема производи за избраните филтри од овој производител."
-                  : "Нема производи од овој производител во моментов."
-            }
-            onResetFilters={hasAnyFilter ? resetAllFilters : undefined}
-            errorTitle="Не можевме да ги вчитаме производите"
-            errorDescription="Проверете дали API серверот е активен, или производителот повеќе не постои."
-            onRetry={() => refetch()}
-          />
-        </div>
-      </div>
-    </main>
+    </CatalogShell>
   );
 };
 

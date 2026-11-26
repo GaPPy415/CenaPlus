@@ -8,8 +8,8 @@ export interface Product {
   singular_price: string | null;
   market: string;
   in_stock: boolean;
-  image: string;
-  link: string;
+  image: string | null;
+  link: string | null;
 }
 
 export interface GroupedProduct {
@@ -28,10 +28,6 @@ export interface ProductsResponse {
   data: GroupedProduct[];
 }
 
-export interface SearchResponse {
-  data: GroupedProduct[];
-}
-
 export interface ProductOffer {
   product_id: string;
   market: string;
@@ -41,7 +37,7 @@ export interface ProductOffer {
   singular_price: string | null;
   in_stock: boolean;
   image: string | null;
-  link: string;
+  link: string | null;
   last_updated: string | null;
   /** Newest `last_updated` across all of this market's products (store data freshness). */
   market_last_updated: string | null;
@@ -75,6 +71,7 @@ export interface ProductDetail {
 }
 
 export type SortBy = "name" | "price" | "discount" | "markets";
+export type SearchSortBy = "relevance" | SortBy;
 export type SortDir = "asc" | "desc";
 
 export async function fetchProducts(
@@ -99,8 +96,22 @@ export async function fetchProducts(
   return res.json();
 }
 
-export async function searchProducts(query: string): Promise<SearchResponse> {
-  const url = `${API_BASE}/search?q=${encodeURIComponent(query)}`;
+export async function searchProducts(
+  query: string,
+  page = 1,
+  perPage: 12 | 24 | 36 = 24,
+  markets: string[] = [],
+  onSale = false,
+  sort: SearchSortBy = "relevance",
+  order: SortDir = "desc"
+): Promise<ProductsResponse> {
+  let url = `${API_BASE}/search?q=${encodeURIComponent(query)}&page=${page}&per_page=${perPage}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}`;
+  for (const m of markets) {
+    url += `&market=${encodeURIComponent(m)}`;
+  }
+  if (onSale) {
+    url += `&on_sale=true`;
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Search failed: ${res.status}`);
   return res.json();

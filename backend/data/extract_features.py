@@ -541,10 +541,16 @@ def build_row(product: dict, features: Optional[ProductFeatures]) -> dict:
         if fallback_value is not None:
             quantity_value = fallback_value
             pack_count = fallback_pack or 1
-            matched = _QTY_TOKEN_RE.search(raw_name) or _MULTIPACK_RE.search(raw_name)
+            matched = _QTY_TOKEN_RE.search(raw_name)
+            multi_match = _MULTIPACK_RE.search(raw_name)
+            unit_source = (
+                matched.group(0)
+                if matched
+                else (raw_name[multi_match.end() :] if multi_match else "")
+            )
             unit_match = re.search(
-                r"(кг|kg|kgs|гр|г|g|grs|мл|ml|mls|л|l|lt|ком|пар|парчиња|pcs)",
-                matched.group(0) if matched else "",
+                r"(?:^\s*|\b)(кг|kg|kgs|гр|г|g|grs|мл|ml|mls|л|l|lt|ком|пар|парчиња|pcs)\b",
+                unit_source,
                 re.IGNORECASE,
             )
             quantity_unit = unit_match.group(1) if unit_match else "pcs"
@@ -685,13 +691,42 @@ def load_products(conn, limit: Optional[int], sample: Optional[int], ids: Option
         return [dict(row) for row in cur.fetchall()]
 
 
+def load_manufacturer_cache(conn) -> dict[str, int]:
+    """Preload alias/canonical -> surviving manufacturer_id map in two queries."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, canonical_name, merged_into FROM manufacturers")
+        mfrs = cur.fetchall()
+        cur.execute("SELECT alias, manufacturer_id FROM manufacturer_aliases")
+        aliases = cur.fetchall()
+
+    merged_into = {mfr_id: target for mfr_id, _, target in mfrs}
+
+    def follow(mfr_id: int) -> int:
+        curr = mfr_id
+        for _ in range(16):
+            nxt = merged_into.get(curr)
+            if nxt is None:
+                break
+            curr = nxt
+        return curr
+
+    cache: dict[str, int] = {}
+    for mfr_id, canonical_name, _ in mfrs:
+        if canonical_name:
+            cache[canonical_name] = follow(mfr_id)
+    for alias, mfr_id in aliases:
+        if alias:
+            cache[alias] = follow(mfr_id)
+    return cache
+
+
 def save_features(conn, rows: List[dict]) -> int:
     if not rows:
         return 0
 
     payload = []
     now = datetime.now()
-    cache: dict = {}
+    cache = load_manufacturer_cache(conn)
     for row in rows:
         manufacturer_id = resolve_manufacturer_id(conn, row["manufacturer_raw"], cache)
         name_key, name_sorted, variant_key = compute_keys(

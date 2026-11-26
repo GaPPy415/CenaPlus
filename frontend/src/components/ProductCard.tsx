@@ -13,10 +13,11 @@ interface ProductCardProps {
 
 const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
   const { items, addItem, updateQuantity } = useCart();
-  const sorted = [...group.products].sort((a, b) => a.price - b.price);
-  const bestPrice = sorted[0]?.price;
-  const firstImage = sorted.find((p) => p.image)?.image;
-  const saleSummary = getGroupSaleSummary(sorted);
+  // `grouped_products` already returns offers ordered by price ASC.
+  const offers = group.products;
+  const bestPrice = offers[0]?.price;
+  const firstImage = offers.find((p) => p.image)?.image;
+  const saleSummary = getGroupSaleSummary(offers);
   const detailHref = `/product?g_id=${group.group_id}`;
 
   return (
@@ -87,31 +88,25 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
             {group.group_name}
           </h3>
         </Link>
-        {sorted.length > 1 && (
-          <p className="mt-1 text-xs text-muted-foreground">{sorted.length} продавници</p>
+        {offers.length > 1 && (
+          <p className="mt-1 text-xs text-muted-foreground">{offers.length} продавници</p>
         )}
       </div>
 
       {/* Prices */}
       <div className="mt-auto">
-        {sorted.map((product) => {
+        {offers.map((product) => {
           const market = MARKET_INFO[product.market] || {
             name: product.market,
             color: "hsl(var(--muted-foreground))",
           };
-          const isBest = product.price === bestPrice && sorted.length > 1;
+          const isBest = product.price === bestPrice && offers.length > 1;
           const discountPct = getDiscountPercent(product.price, product.regular_price);
           const cartItem = items.find((item) => item.product.product_id === product.product_id);
           const quantity = cartItem?.quantity || 0;
-
-          return (
-            <a
-              key={product.product_id}
-              href={product.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="price-row group/row relative gap-2 transition-colors hover:bg-muted/50"
-            >
+          const hasLink = Boolean(product.link);
+          const rowContent = (
+            <>
               <div className="flex min-w-0 items-center gap-2">
                 <span
                   aria-hidden="true"
@@ -119,10 +114,12 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                   style={{ backgroundColor: market.color }}
                 />
                 <span className="truncate text-sm text-card-foreground">{market.name}</span>
-                <ExternalLink
-                  className="h-3 w-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100"
-                  aria-hidden="true"
-                />
+                {hasLink && (
+                  <ExternalLink
+                    className="h-3 w-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100"
+                    aria-hidden="true"
+                  />
+                )}
               </div>
               <div className="flex flex-shrink-0 items-center gap-2">
                 <div className="flex flex-col items-end text-right">
@@ -161,6 +158,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                   {quantity > 0 ? (
                     <div className="flex h-full w-full items-center overflow-hidden rounded-full border bg-background shadow-sm transition-all">
                       <button
+                        type="button"
                         onClick={() => updateQuantity(product.product_id, quantity - 1)}
                         className="flex h-full flex-1 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground active:bg-muted"
                         aria-label="Намали количина"
@@ -171,6 +169,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                         {quantity}
                       </span>
                       <button
+                        type="button"
                         onClick={() => updateQuantity(product.product_id, quantity + 1)}
                         className="flex h-full flex-1 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground active:bg-muted"
                         aria-label="Зголеми количина"
@@ -180,6 +179,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                     </div>
                   ) : (
                     <button
+                      type="button"
                       onClick={() => addItem(product)}
                       className="flex h-full w-full translate-x-2 items-center justify-center gap-1 rounded-full bg-primary px-2 text-xs font-medium text-primary-foreground opacity-0 shadow-sm transition-all hover:bg-primary/90 focus-visible:opacity-100 group-hover/row:translate-x-0 group-hover/row:opacity-100"
                       aria-label={`Додај ${market.name} во кошничка`}
@@ -208,7 +208,26 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                   </p>
                 </div>
               </div>
+            </>
+          );
+
+          return hasLink ? (
+            <a
+              key={product.product_id}
+              href={product.link as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="price-row group/row relative gap-2 transition-colors hover:bg-muted/50"
+            >
+              {rowContent}
             </a>
+          ) : (
+            <div
+              key={product.product_id}
+              className="price-row group/row relative gap-2 transition-colors hover:bg-muted/50"
+            >
+              {rowContent}
+            </div>
           );
         })}
 

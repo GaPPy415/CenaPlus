@@ -16,6 +16,7 @@ import {
 import { MARKET_INFO } from "@/lib/categories";
 import { fetchProductDetail, type ProductOffer } from "@/lib/api";
 import { getDiscountPercent, getGroupSaleSummary } from "@/lib/sale";
+import { formatDateTime } from "@/lib/utils";
 
 const UNIT_LABELS: Record<string, string> = {
   g: "г",
@@ -39,16 +40,6 @@ const formatDate = (value: string | null) => {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString("mk-MK");
 };
 
-const formatDateTime = (value: string | null) => {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`;
-};
-
 const marketOf = (key: string) =>
   MARKET_INFO[key] ?? { name: key, color: "hsl(var(--muted-foreground))" };
 
@@ -57,37 +48,49 @@ const OfferRow = ({ offer }: { offer: ProductOffer }) => {
   const updated = formatDate(offer.last_updated);
   const marketUpdated = formatDateTime(offer.market_last_updated);
   const discountPct = offer.in_stock ? getDiscountPercent(offer.price, offer.regular_price) : null;
+  const hasLink = Boolean(offer.link);
+  const offerInfo = (
+    <>
+      <span
+        aria-hidden="true"
+        className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+        style={{ backgroundColor: market.color }}
+      />
+      <span className="min-w-0">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-card-foreground">
+          {market.name}
+          {hasLink && <ExternalLink className="h-3 w-3 text-muted-foreground" aria-hidden="true" />}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground" title={offer.name}>
+          {offer.name}
+        </span>
+      </span>
+      {offer.kratok_rok && (
+        <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+          краток рок
+        </span>
+      )}
+    </>
+  );
 
   return (
     <li className="price-row gap-3">
-      <a
-        href={offer.link}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={`Отвори ${offer.name} во ${market.name}`}
-        className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <span
-          aria-hidden="true"
-          className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-          style={{ backgroundColor: market.color }}
-        />
-        <span className="min-w-0">
-          <span className="flex items-center gap-1.5 text-sm font-medium text-card-foreground">
-            {market.name}
-            <ExternalLink className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
-          </span>
-          <span className="block truncate text-xs text-muted-foreground" title={offer.name}>
-            {offer.name}
-          </span>
-        </span>
-        {offer.kratok_rok && (
-          <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-            краток рок
-          </span>
-        )}
-      </a>
+      {hasLink ? (
+        <a
+          href={offer.link as string}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Отвори ${offer.name} во ${market.name}`}
+          className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {offerInfo}
+        </a>
+      ) : (
+        <div className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 rounded-md px-1">
+          {offerInfo}
+        </div>
+      )}
 
       <div className="flex flex-shrink-0 flex-col items-end text-right">
         <div className="flex flex-wrap items-baseline justify-end gap-1.5">

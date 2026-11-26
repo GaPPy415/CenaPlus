@@ -56,27 +56,28 @@ DISCOUNT_PRICE_COLUMN = 'ЦЕНА СО ПОПУСТ'
 REGULAR_PRICE_COLUMN = 'РЕДОВНА ЦЕНА'
 
 
+_GROUPED_PRICE_RE = re.compile(r"(\d{1,3}(?:\.\d{3})+)(?:,\d+)?(?:\D|$)")
+_PLAIN_PRICE_RE = re.compile(r"(\d+)(?:[.,]\d+)?")
+
+
 def _parse_int_price(value) -> int | None:
     if value is None or pd.isna(value):
         return None
     if isinstance(value, (int, float)):
         parsed = int(value)
         return parsed if parsed > 0 else None
-    match = re.search(r"(\d+)", str(value).replace(".", ""))
+    text = str(value).strip()
+    if not text:
+        return None
+    grouped = _GROUPED_PRICE_RE.search(text)
+    if grouped:
+        parsed = int(grouped.group(1).replace(".", ""))
+        return parsed if parsed > 0 else None
+    match = _PLAIN_PRICE_RE.search(text)
     if not match:
         return None
     parsed = int(match.group(1))
     return parsed if parsed > 0 else None
-
-
-def extract_dates(period):
-    if pd.isna(period) or period == '':
-        return None, None
-    try:
-        from_date, to_date = period.split(' - ')
-        return from_date.strip(), to_date.strip()
-    except ValueError:
-        return None, None
 
 
 def scrape_store(store: str) -> list[ScrapedProduct]:
@@ -88,17 +89,10 @@ def scrape_store(store: str) -> list[ScrapedProduct]:
     )
     response.raise_for_status()
     df_new = pd.read_html(io.StringIO(response.text))[0]
-    store_id = store.rsplit('_', 1)[0].split('marketi/')[1].replace('/', '')
-    df_new["storeId"] = store_id
 
     if df_new.empty:
         print(f"No data found for store: {store}")
         return []
-
-    df_new[['promotionDateFrom', 'promotionDateTo']] = df_new['ВРЕМЕТРАЕЊЕ НА АКЦИЈА'].apply(
-        lambda x: pd.Series(extract_dates(x))
-    )
-    df_new = df_new.drop(columns='ВРЕМЕТРАЕЊЕ НА АКЦИЈА')
 
     product_col = df_new.columns[0]
     products: list[ScrapedProduct] = []
@@ -111,10 +105,12 @@ def scrape_store(store: str) -> list[ScrapedProduct]:
             val = row[col]
             data[col] = None if pd.isna(val) else val
 
-        price = int(data['ПРОДАЖНА ЦЕНА'])
+        price = _parse_int_price(data.get('ПРОДАЖНА ЦЕНА'))
+        if price is None:
+            continue
         regular_price = _parse_int_price(data.get(REGULAR_PRICE_COLUMN))
-        if data.get(DISCOUNT_PRICE_COLUMN) is not None:
-            discount_price = int(data[DISCOUNT_PRICE_COLUMN].rsplit(' ', 1)[0][:-3])
+        discount_price = _parse_int_price(data.get(DISCOUNT_PRICE_COLUMN))
+        if discount_price is not None:
             if regular_price is None:
                 regular_price = price
             price = discount_price
@@ -124,8 +120,8 @@ def scrape_store(store: str) -> list[ScrapedProduct]:
                 name=name,
                 price=price,
                 regular_price=regular_price,
-                singular_price=data['ЕДИНЕЧНА ЦЕНА'],
-                description=data['ОПИС НА ПРОИЗВОД'],
+                singular_price=data.get('ЕДИНЕЧНА ЦЕНА'),
+                description=data.get('ОПИС НА ПРОИЗВОД'),
                 # The store page only lists what is on the shelf today.
                 in_stock=True,
             )

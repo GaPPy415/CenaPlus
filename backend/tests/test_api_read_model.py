@@ -248,10 +248,27 @@ class ApiReadModelTests(unittest.TestCase):
 
     def test_search_and_product_detail(self):
         res = search_products("кока кола")
+        self.assertGreater(res["total"], 0)
+        self.assertLessEqual(res["total"], 500)
+        self.assertEqual(res["page"], 1)
+        self.assertEqual(res["per_page"], 24)
         self.assertGreater(len(res["data"]), 0)
+        self.assertLessEqual(len(res["data"]), 24)
         first = res["data"][0]
         self.assertEqual(set(first.keys()), EXPECTED_GROUP_KEYS | {"similarity"})
         self.assertGreaterEqual(first["similarity"], 0.8)
+
+        # Pagination + sorting + market filter on /search
+        paged = search_products("кока кола", page=1, per_page=12, sort="price", order="asc")
+        self.assertEqual(paged["total"], res["total"])
+        self.assertEqual(paged["per_page"], 12)
+        mins = [min(p["price"] for p in row["products"]) for row in paged["data"]]
+        self.assertEqual(mins, sorted(mins))
+
+        filtered = search_products("кока кола", page=1, per_page=12, market=["vero"])
+        self.assertLessEqual(filtered["total"], res["total"])
+        for row in filtered["data"]:
+            self.assertIn("vero", {p["market"] for p in row["products"]})
 
         detail = get_product_detail(str(first["group_id"]))
         self.assertEqual(str(detail["group"]["group_id"]), str(first["group_id"]))

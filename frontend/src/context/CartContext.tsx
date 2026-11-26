@@ -21,12 +21,32 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const CART_STORAGE_KEY = 'cenaplus_cart';
 
-export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [items, setItems] = useState<CartItem[]>(() => {
-    if (typeof window === 'undefined') return [];
+const readStoredCart = (): CartItem[] => {
+  if (typeof window === 'undefined') return [];
+  try {
     const savedCart = localStorage.getItem(CART_STORAGE_KEY);
-    return savedCart ? JSON.parse(savedCart) : [];
-  });
+    if (!savedCart) return [];
+    const parsed: unknown = JSON.parse(savedCart);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is CartItem =>
+        Boolean(
+          entry &&
+            typeof entry === 'object' &&
+            typeof (entry as CartItem).quantity === 'number' &&
+            (entry as CartItem).quantity > 0 &&
+            (entry as CartItem).product &&
+            typeof (entry as CartItem).product.product_id === 'string' &&
+            typeof (entry as CartItem).product.price === 'number'
+        )
+    );
+  } catch {
+    return [];
+  }
+};
+
+export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [items, setItems] = useState<CartItem[]>(readStoredCart);
 
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));

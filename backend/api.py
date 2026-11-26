@@ -17,8 +17,9 @@ app = FastAPI()
 
 # `/search` uses pg_trgm over the canonical product name; a name is a match when
 # similarity clears this floor. Brands live outside product_name, so the query
-# matches manufacturer names too.
+# matches manufacturer names too. Results are capped so broad terms stay fast.
 SEARCH_SIMILARITY_THRESHOLD = 0.8
+SEARCH_MAX_RESULTS = 500
 
 
 def _create_pool() -> ThreadedConnectionPool:
@@ -95,6 +96,14 @@ class SortBy(str, Enum):
     markets = "markets"
 
 
+class SearchSortBy(str, Enum):
+    relevance = "relevance"
+    name = "name"
+    price = "price"
+    discount = "discount"
+    markets = "markets"
+
+
 class SortDir(str, Enum):
     asc = "asc"
     desc = "desc"
@@ -105,6 +114,14 @@ _DEFAULT_SORT_DIR: dict[SortBy, SortDir] = {
     SortBy.price: SortDir.asc,
     SortBy.discount: SortDir.desc,
     SortBy.markets: SortDir.desc,
+}
+
+_DEFAULT_SEARCH_SORT_DIR: dict[SearchSortBy, SortDir] = {
+    SearchSortBy.relevance: SortDir.desc,
+    SearchSortBy.name: SortDir.asc,
+    SearchSortBy.price: SortDir.asc,
+    SearchSortBy.discount: SortDir.desc,
+    SearchSortBy.markets: SortDir.desc,
 }
 
 _ORDER_BY_SQL: dict[tuple[SortBy, SortDir], str] = {
@@ -118,22 +135,59 @@ _ORDER_BY_SQL: dict[tuple[SortBy, SortDir], str] = {
     (SortBy.markets, SortDir.asc): "market_count ASC, min_price ASC NULLS LAST, group_name ASC",
 }
 
+_SEARCH_ORDER_BY_SQL: dict[tuple[SearchSortBy, SortDir], str] = {
+    (SearchSortBy.relevance, SortDir.desc): "similarity DESC, group_name ASC",
+    (SearchSortBy.relevance, SortDir.asc): "similarity ASC, group_name ASC",
+    **{(SearchSortBy(k.value), d): sql for (k, d), sql in _ORDER_BY_SQL.items()},
+}
+
+
+def _unwrap_param(value):
+    """Unwrap FastAPI Query/Param defaults when endpoint functions are called directly."""
+    return getattr(value, "default", value)
+
 
 def _resolve_order_by(sort: SortBy | str | object, order: SortDir | str | None | object) -> str:
     """Resolve (sort, order) to a static ORDER BY clause, tolerating direct Python calls."""
-    sort_raw = getattr(sort, "value", sort)
+    sort_val = _unwrap_param(sort)
+    sort_raw = getattr(sort_val, "value", sort_val)
     try:
         sort_by = SortBy(sort_raw) if isinstance(sort_raw, str) else SortBy.name
     except ValueError:
         sort_by = SortBy.name
 
-    order_raw = getattr(order, "value", order)
+    order_val = _unwrap_param(order)
+    order_raw = getattr(order_val, "value", order_val)
     try:
         sort_dir = SortDir(order_raw) if isinstance(order_raw, str) else _DEFAULT_SORT_DIR[sort_by]
     except ValueError:
         sort_dir = _DEFAULT_SORT_DIR[sort_by]
 
     return _ORDER_BY_SQL[(sort_by, sort_dir)]
+
+
+def _resolve_search_order_by(
+    sort: SearchSortBy | str | object,
+    order: SortDir | str | None | object,
+) -> str:
+    """Resolve (sort, order) for /search, supporting relevance alongside catalog sorts."""
+    sort_val = _unwrap_param(sort)
+    sort_raw = getattr(sort_val, "value", sort_val)
+    try:
+        sort_by = SearchSortBy(sort_raw) if isinstance(sort_raw, str) else SearchSortBy.relevance
+    except ValueError:
+        sort_by = SearchSortBy.relevance
+
+    order_val = _unwrap_param(order)
+    order_raw = getattr(order_val, "value", order_val)
+    try:
+        sort_dir = (
+            SortDir(order_raw) if isinstance(order_raw, str) else _DEFAULT_SEARCH_SORT_DIR[sort_by]
+        )
+    except ValueError:
+        sort_dir = _DEFAULT_SEARCH_SORT_DIR[sort_by]
+
+    return _SEARCH_ORDER_BY_SQL[(sort_by, sort_dir)]
 
 
 @app.get("/health")
@@ -146,46 +200,121 @@ def get_categories():
     return {k: v for k, v in CATEGORIES.items()}
 
 
-SEARCH_SQL = """
+SEARCH_SQL_TEMPLATE = """
     WITH candidates AS MATERIALIZED (
-        SELECT g.id, similarity(g.product_name, %(q)s) AS sim
+        SELECT g.id, similarity(g.product_name, %s) AS sim
         FROM groups g
-        WHERE g.product_name %% %(q)s
-          AND similarity(g.product_name, %(q)s) >= %(threshold)s
+        WHERE g.product_name %% %s
+          AND similarity(g.product_name, %s) >= %s
         UNION ALL
-        SELECT g.id, similarity(m.canonical_name, %(q)s) AS sim
+        SELECT g.id, similarity(m.canonical_name, %s) AS sim
         FROM manufacturers m
         JOIN groups g ON g.manufacturer_id = m.id
-        WHERE m.canonical_name %% %(q)s
-          AND similarity(m.canonical_name, %(q)s) >= %(threshold)s
+        WHERE m.canonical_name %% %s
+          AND similarity(m.canonical_name, %s) >= %s
     ),
     matched AS (
         SELECT id, max(sim) AS similarity FROM candidates GROUP BY id
+    ),
+    filtered AS MATERIALIZED (
+        SELECT gp.group_id,
+               gp.group_name,
+               gp.main_category,
+               gp.sub_category,
+               gp.min_price,
+               gp.max_discount_pct,
+               gp.market_count,
+               gp.products,
+               matched.similarity
+        FROM matched
+        JOIN grouped_products gp ON gp.group_id = matched.id
+        {where_clause}
+        ORDER BY matched.similarity DESC, gp.group_name ASC
+        LIMIT %s
     )
-    SELECT gp.group_id,
-           gp.group_name,
-           gp.main_category,
-           gp.sub_category,
-           matched.similarity,
-           gp.products
-    FROM matched
-    JOIN grouped_products gp ON gp.group_id = matched.id
-    ORDER BY matched.similarity DESC
+    SELECT (SELECT count(*)::int FROM filtered) AS total,
+           COALESCE(
+               (SELECT json_agg(row_to_json(p))
+                FROM (
+                    SELECT group_id,
+                           group_name,
+                           main_category,
+                           sub_category,
+                           similarity,
+                           products
+                    FROM filtered
+                    ORDER BY {order_by_sql}
+                    LIMIT %s OFFSET %s
+                ) p),
+               '[]'::json
+           ) AS data
 """
 
 
 @app.get("/search")
-def search_products(q: str = Query(..., min_length=1)):
-    """Fuzzy product search (pg_trgm).
+def search_products(
+    q: str = Query(..., min_length=1),
+    page: int = Query(1, ge=1),
+    per_page: PerPage = Query(PerPage.twenty_four),
+    market: list[str] = Query(None),
+    on_sale: bool = Query(False),
+    sort: SearchSortBy = Query(SearchSortBy.relevance),
+    order: SortDir | None = Query(None),
+):
+    """Fuzzy product search (pg_trgm), paginated and capped at SEARCH_MAX_RESULTS.
 
     Every value is passed as a bound parameter — the query text is never
     assembled from user input, so `%`, quotes and `;` cannot alter it.
     """
     needle = strip_quantity_tokens(normalize_string(q)) or (normalize_string(q) or q.strip().lower())
+    page_value = max(1, int(_unwrap_param(page)))
+    raw_per_page = _unwrap_param(per_page)
+    per_page_value = int(getattr(raw_per_page, "value", raw_per_page))
+    offset = per_page_value * (page_value - 1)
+    raw_markets = _unwrap_param(market)
+    active_markets = (
+        [m for m in raw_markets if (m or "").strip()]
+        if isinstance(raw_markets, (list, tuple))
+        else []
+    )
+    only_on_sale = _unwrap_param(on_sale) is True
+    order_by_sql = _resolve_search_order_by(sort, order)
+
+    where_sql, filter_params = _build_listing_filters(
+        [],
+        [],
+        markets=active_markets,
+        on_sale=only_on_sale,
+    )
+    where_clause = f"WHERE {where_sql}" if where_sql else ""
+    sql = SEARCH_SQL_TEMPLATE.format(where_clause=where_clause, order_by_sql=order_by_sql)
+
     with get_cursor() as cur:
-        cur.execute(SEARCH_SQL, {"q": needle, "threshold": SEARCH_SIMILARITY_THRESHOLD})
-        rows = cur.fetchall()
-    return {"data": rows}
+        cur.execute(
+            sql,
+            (
+                needle,
+                needle,
+                needle,
+                SEARCH_SIMILARITY_THRESHOLD,
+                needle,
+                needle,
+                needle,
+                SEARCH_SIMILARITY_THRESHOLD,
+                *filter_params,
+                SEARCH_MAX_RESULTS,
+                per_page_value,
+                offset,
+            ),
+        )
+        result = cur.fetchone()
+
+    return {
+        "total": result["total"],
+        "page": page_value,
+        "per_page": per_page_value,
+        "data": result["data"],
+    }
 
 
 def _build_listing_filters(
@@ -236,7 +365,7 @@ RESOLVE_MANUFACTURER_SQL = """
                c.priority, c.depth + 1
         FROM manufacturers m
         JOIN chain c ON m.id = c.merged_into
-        WHERE c.merged_into IS NOT NULL
+        WHERE c.merged_into IS NOT NULL AND c.depth < 16
     ),
     resolved AS (
         SELECT id, canonical_name, display_name

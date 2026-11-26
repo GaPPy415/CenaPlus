@@ -702,11 +702,9 @@ def main() -> int:
         return 0
 
     print("\nrebuilding groups table...")
-    cur.execute("TRUNCATE TABLE groups")
-    cur.execute("UPDATE products SET group_id = NULL")
-    conn.commit()
-
     with conn.cursor() as write_cur:
+        write_cur.execute("TRUNCATE TABLE groups")
+        write_cur.execute("UPDATE products SET group_id = NULL")
         columns = (
             "id", "name", "main_category", "sub_category", "manufacturer_id",
             "product_name", "product_name_sorted", "quantity_value", "quantity_unit",

@@ -3,14 +3,8 @@ import { useEffect, useState } from "react";
 import { fetchProducts, type SortBy, type SortDir } from "@/lib/api";
 import { DEFAULT_SORT_DIR, type PerPageOption } from "@/lib/catalog";
 import { PerPageControl, SortControl } from "@/components/CatalogControls";
-import CatalogGrid from "@/components/CatalogGrid";
-import {
-  MarketFilterActivePills,
-  MarketFilterMobileButton,
-  MarketFilterMobileDrawer,
-  MarketFilterSidebar,
-  OnSaleFilterButton,
-} from "@/components/MarketFilter";
+import CatalogShell from "@/components/CatalogShell";
+import { MarketFilterMobileButton, OnSaleFilterButton } from "@/components/MarketFilter";
 
 interface Props {
   mainCategory: string;
@@ -104,92 +98,71 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
   const hasFilters = onSaleOnly || selectedMarkets.length > 0;
 
   return (
-    <div className="w-full py-8">
-      <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 px-4 sm:px-6 lg:grid-cols-[13.5rem_minmax(0,1fr)] xl:grid-cols-[14rem_minmax(0,1fr)] xl:gap-8 xl:px-8">
-        <MarketFilterSidebar
-          selectedMarkets={selectedMarkets}
-          onToggleMarket={toggleMarket}
-          onResetMarkets={resetMarkets}
-          onSaleOnly={onSaleOnly}
-          onToggleOnSale={toggleOnSale}
-          onResetAll={resetAllFilters}
-        />
+    <CatalogShell
+      selectedMarkets={selectedMarkets}
+      onToggleMarket={toggleMarket}
+      onResetMarkets={resetMarkets}
+      onSaleOnly={onSaleOnly}
+      onToggleOnSale={toggleOnSale}
+      onResetSidebarFilters={resetAllFilters}
+      mobileMarketsOpen={mobileFiltersOpen}
+      mobilePanelId="subcat-mobile-markets-panel"
+      items={data?.data}
+      isLoading={isLoading}
+      isError={isError}
+      isPlaceholderData={isPlaceholderData}
+      filterKey={filterKey}
+      page={page}
+      totalPages={totalPages}
+      onPageChange={(next) => {
+        setPage(next);
+        window.scrollTo({ top: 0 });
+      }}
+      emptyMessage={
+        onSaleOnly
+          ? "Моментално нема производи на акција за избраните филтри."
+          : "Нема производи за избраните продавници во оваа поткатегорија."
+      }
+      onResetAllFilters={hasFilters ? resetAllFilters : undefined}
+    >
+      {/* Header + toolbar */}
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+            {mainCategory}
+          </p>
+          <h1 className="mt-0.5 font-heading text-2xl font-extrabold text-foreground sm:text-3xl">
+            {subCategory}
+          </h1>
+          <p className="mt-1 min-h-[20px] text-sm tabular-nums text-muted-foreground">
+            {data ? `${data.total} производи` : ""}
+          </p>
+        </div>
 
-        <div className="min-w-0">
-          {/* Header + toolbar */}
-          <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-primary">
-                {mainCategory}
-              </p>
-              <h1 className="mt-0.5 font-heading text-2xl font-extrabold text-foreground sm:text-3xl">
-                {subCategory}
-              </h1>
-              <p className="mt-1 min-h-[20px] text-sm tabular-nums text-muted-foreground">
-                {data ? `${data.total} производи` : ""}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <OnSaleFilterButton active={onSaleOnly} onToggle={toggleOnSale} />
-              <MarketFilterMobileButton
-                open={mobileFiltersOpen}
-                selectedCount={selectedMarkets.length}
-                panelId="subcat-mobile-markets-panel"
-                onToggle={() => setMobileFiltersOpen((open) => !open)}
-              />
-              <SortControl
-                sortBy={sortBy}
-                sortDir={sortDir}
-                onSortByChange={handleSortByChange}
-                onToggleDir={handleToggleSortDir}
-              />
-              <PerPageControl
-                perPage={perPage}
-                onChange={(next) => {
-                  setPerPage(next);
-                  setPage(1);
-                }}
-              />
-            </div>
-          </div>
-
-          <MarketFilterActivePills
+        <div className="flex flex-wrap items-center gap-3">
+          <OnSaleFilterButton active={onSaleOnly} onToggle={toggleOnSale} />
+          <MarketFilterMobileButton
             open={mobileFiltersOpen}
-            selectedMarkets={selectedMarkets}
-            onToggleMarket={toggleMarket}
-            onResetMarkets={resetMarkets}
-          />
-          <MarketFilterMobileDrawer
-            open={mobileFiltersOpen}
+            selectedCount={selectedMarkets.length}
             panelId="subcat-mobile-markets-panel"
-            selectedMarkets={selectedMarkets}
-            onToggleMarket={toggleMarket}
-            onResetMarkets={resetMarkets}
+            onToggle={() => setMobileFiltersOpen((open) => !open)}
           />
-
-          <CatalogGrid
-            items={data?.data}
-            isLoading={isLoading}
-            isError={isError}
-            isPlaceholderData={isPlaceholderData}
-            filterKey={filterKey}
-            page={page}
-            totalPages={totalPages}
-            onPageChange={(next) => {
-              setPage(next);
-              window.scrollTo({ top: 0 });
+          <SortControl
+            sortBy={sortBy}
+            sortDir={sortDir}
+            onSortByChange={handleSortByChange}
+            onToggleDir={handleToggleSortDir}
+          />
+          <PerPageControl
+            perPage={perPage}
+            onChange={(next) => {
+              setPerPage(next);
+              setPage(1);
             }}
-            emptyMessage={
-              onSaleOnly
-                ? "Моментално нема производи на акција за избраните филтри."
-                : "Нема производи за избраните продавници во оваа поткатегорија."
-            }
-            onResetFilters={hasFilters ? resetAllFilters : undefined}
           />
         </div>
       </div>
-    </div>
+    </CatalogShell>
   );
 };
 

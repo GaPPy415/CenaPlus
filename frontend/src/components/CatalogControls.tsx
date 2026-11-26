@@ -1,26 +1,28 @@
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, ChevronDown } from "lucide-react";
-import type { SortBy, SortDir } from "@/lib/api";
+import type { SearchSortBy, SortBy, SortDir } from "@/lib/api";
 import {
   PER_PAGE_OPTIONS,
-  SORT_DIR_LABELS,
+  SEARCH_SORT_DIR_LABELS,
   SORT_OPTIONS,
   type PerPageOption,
 } from "@/lib/catalog";
 
-interface SortControlProps {
-  sortBy: SortBy;
+interface SortControlProps<T extends SearchSortBy = SortBy> {
+  sortBy: T;
   sortDir: SortDir;
-  onSortByChange: (next: SortBy) => void;
+  onSortByChange: (next: T) => void;
   onToggleDir: () => void;
+  options?: ReadonlyArray<{ value: T; label: string }>;
 }
 
-export const SortControl = ({
+export const SortControl = <T extends SearchSortBy = SortBy>({
   sortBy,
   sortDir,
   onSortByChange,
   onToggleDir,
-}: SortControlProps) => {
-  const dirLabel = SORT_DIR_LABELS[sortBy][sortDir];
+  options = SORT_OPTIONS as ReadonlyArray<{ value: T; label: string }>,
+}: SortControlProps<T>) => {
+  const dirLabel = SEARCH_SORT_DIR_LABELS[sortBy][sortDir];
 
   return (
     <div className="flex items-center gap-1.5">
@@ -31,10 +33,10 @@ export const SortControl = ({
         <select
           id="catalog-sort-select"
           value={sortBy}
-          onChange={(e) => onSortByChange(e.target.value as SortBy)}
+          onChange={(e) => onSortByChange(e.target.value as T)}
           className="min-h-[36px] cursor-pointer appearance-none rounded-md border border-border bg-card py-1 pl-3 pr-8 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {SORT_OPTIONS.map((opt) => (
+          {options.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

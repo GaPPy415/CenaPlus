@@ -193,18 +193,6 @@ CREATE INDEX IF NOT EXISTS idx_products_features_pending
     ON public.products USING btree (id)
     WHERE features_extracted_at IS NULL;
 
--- deterministic grouping
-CREATE INDEX IF NOT EXISTS idx_products_identity
-    ON public.products USING btree (manufacturer_id, product_name, quantity_value,
-                                    quantity_unit, is_fluid);
-
-CREATE INDEX IF NOT EXISTS idx_products_group_key
-    ON public.products USING btree (manufacturer_id, product_name_sorted, quantity_value,
-                                    quantity_unit, is_fluid, variant_key);
-
-CREATE INDEX IF NOT EXISTS idx_products_variant
-    ON public.products USING gin (variant jsonb_path_ops);
-
 -- /search: trigram matching over canonical product names + manufacturer names
 CREATE INDEX IF NOT EXISTS idx_groups_product_name_trgm
     ON public.groups USING gin (product_name gin_trgm_ops);

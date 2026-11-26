@@ -6,7 +6,7 @@ Data pipeline orchestration for CenaPlus: scrape → categorize → extract feat
 
 | Module | Role |
 |--------|------|
-| `constants.py` | Category taxonomy (loaded from `shared/categories.json`), Gemini prompt descriptions (`CATEGORY_DESCRIPTIONS`), computed compressed taxonomy string (`TAXONOMY_COMPRESSED`) |
+| `constants.py` | Category taxonomy (loaded from `shared/categories.json`) and Gemini prompt descriptions (`CATEGORY_DESCRIPTIONS`) |
 | `db_utils.py` | PostgreSQL connection, upsert/batch update helpers, in-stock status management |
 | `categorize_products.py` | Two-stage Gemini 3.1 Flash-Lite categorization (main → sub), Pydantic `response_schema`, batched via shared `RateLimiter` + `call_with_retries` |
 | `extract_features.py` | Gemini 3.1 Flash-Lite feature extraction (manufacturer / product_name / quantity / metadata) into `products`; deterministic canonicalisation in Python; skips `Разно`/`Останато` |
@@ -17,7 +17,7 @@ Data pipeline orchestration for CenaPlus: scrape → categorize → extract feat
 | `RateLimiter.py` | Async token-aware rate limiter for Gemini API, tracks RPM/TPM per 60-sec window across subprocesses |
 | `run_scrapers.py` | Orchestrator: auto-discovers `*_scraper.py` files, runs sequential or parallel (ThreadPoolExecutor), writes JSON run summaries to `logs/` |
 | `run_pipeline.py` | Full pipeline runner: `run_scrapers.py` → `categorize_products.py` → `extract_features.py` → `group_products.py --apply` sequentially as subprocesses, stops on first failure |
-| `scrapers/` | `scraper_base.py` (`ScrapedProduct` + `MarketScraper`), shared platform bases (`proverkanaceni_platform.py`, `zur_platform.py`), and 12 market scrapers |
+| `scrapers/` | `scraper_base.py` (`ScrapedProduct` + `MarketScraper`), shared platform bases (`proverkanaceni_platform.py`, `zur_platform.py`, `woocommerce_platform.py`), and 12 market scrapers |
 | `tools/grouping_keys.py` | Maintenance CLI to derive/recompute `product_name_key`, `product_name_sorted`, `variant_key`, `variant` |
 | `tools/manufacturer_merges.py` | Maintenance CLI (`propose`, `--csv`, `--apply`, `--pair`) writing `manufacturers.merged_into` |
 | `tools/product_name_aliases.py` | Maintenance CLI (`--all`, `--report`, `--csv`, `--apply`) for `product_name_token_aliases` |

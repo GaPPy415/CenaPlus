@@ -94,10 +94,6 @@ def strip_metadata_promo(name: str, metadata) -> str:
     return " ".join(name.split())
 
 
-def form_signature(name: str) -> tuple:
-    return tuple(sorted(t for t in name.split() if t in FORM_WORDS))
-
-
 def name_variant_signature(name: str) -> tuple:
     """Variant signals left inside the raw name: sizes (75М/100М), dimensions, gender."""
     signature = set()
@@ -142,34 +138,8 @@ def variants_compatible(a: dict[str, str], b: dict[str, str]) -> bool:
 
 
 # --------------------------------------------------------------------------
-# merge/split decision for one collision bucket
+# guarded fuzzy name merging
 # --------------------------------------------------------------------------
-def prices_compatible(rows: list[dict]) -> bool:
-    """True when prices agree, or when a row is out of stock and can't be compared."""
-    prices = [row["price"] for row in rows if row["price"] is not None]
-    if not prices:
-        return True
-    if len(set(prices)) == 1:
-        return True
-    return any(not row["in_stock"] for row in rows)
-
-
-def levenshtein(a: str, b: str) -> int:
-    if a == b:
-        return 0
-    if abs(len(a) - len(b)) > 1:
-        return 2
-    previous = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        current = [i]
-        for j, cb in enumerate(b, 1):
-            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb)))
-        previous = current
-    return previous[-1]
-
-
-MERGE_CLASSES = ("kratok_rok", "duplicate", "promo", "word_order", "near_identical", "single_char")
-
 # tokens that may differ without changing the product
 SOFT_TOKENS = {"со", "и", "за", "од", "на", "во", "по", "до"}
 # known spelling equivalences between shops (add as they are found)
@@ -235,41 +205,6 @@ def guarded_fuzzy_merge(name_a: str, name_b: str) -> bool:
         return True
 
     return all_match(only_a, only_b) and all_match(only_b, only_a)
-
-
-def classify(rows: list[dict]) -> str:
-    """Classify one same-market collision bucket. MERGE_CLASSES may share a group."""
-    raw_names = [normalize_string(row["raw_name"]) or "" for row in rows]
-    names = [strip_metadata_promo(strip_promo(canonicalize_units(name)), row["metadata"])
-             for name, row in zip(raw_names, rows)]
-    variants = [canonical_variant(row["metadata"]) for row in rows]
-    market = rows[0]["market"]
-
-    if market == "vero" and any("краток рок" in (row["raw_name"] or "").lower() for row in rows):
-        return "kratok_rok"
-    if len(set(variants)) > 1:
-        return "variant"
-    if len({name_variant_signature(name) for name in raw_names}) > 1:
-        return "variant"
-    if len({form_signature(name) for name in names}) > 1:
-        return "variant"
-    if len(set(names)) == 1:
-        return "promo" if len(set(raw_names)) > 1 else "duplicate"
-    if len({tuple(sorted(name.split())) for name in names}) == 1:
-        return "word_order"
-
-    max_similarity = max(
-        difflib.SequenceMatcher(None, names[i], names[j]).ratio()
-        for i in range(len(names)) for j in range(i + 1, len(names))
-    )
-    if max_similarity >= 0.90 and prices_compatible(rows):
-        return "near_identical"
-
-    max_distance = max(levenshtein(names[i], names[j])
-                       for i in range(len(names)) for j in range(i + 1, len(names)))
-    if max_distance <= 1 and prices_compatible(rows):
-        return "single_char"
-    return "residual"
 
 
 # --------------------------------------------------------------------------

@@ -9,6 +9,8 @@ with a stubbed `scrape_store` instead of hitting the network.
 import time
 import unittest
 
+from unittest.mock import MagicMock, patch
+
 from backend.data.scrapers import Ramstore_scraper as ramstore
 from backend.data.scrapers.scraper_base import ScrapedProduct
 
@@ -46,6 +48,62 @@ class ParallelFetchTests(unittest.TestCase):
 
         self.assertEqual(len(products), len(ramstore.stores) - 1)
         self.assertNotIn(f"product-{broken}", [p.name for p in products])
+
+
+class PriceAndTableParsingTests(unittest.TestCase):
+    def test_parse_int_price_handles_macedonian_and_decimal_formats(self):
+        self.assertEqual(ramstore._parse_int_price(120), 120)
+        self.assertEqual(ramstore._parse_int_price(120.0), 120)
+        self.assertEqual(ramstore._parse_int_price("120.00 ден."), 120)
+        self.assertEqual(ramstore._parse_int_price("120,00 ден."), 120)
+        self.assertEqual(ramstore._parse_int_price("1.250,00 ден."), 1250)
+        self.assertEqual(ramstore._parse_int_price("1.250 ден."), 1250)
+        self.assertIsNone(ramstore._parse_int_price("0"))
+        self.assertIsNone(ramstore._parse_int_price(""))
+        self.assertIsNone(ramstore._parse_int_price(None))
+
+    def test_scrape_store_skips_bad_price_rows_and_ignores_missing_promo_dates_col(self):
+        html_table = """
+        <table>
+          <thead>
+            <tr>
+              <th>НАЗИВ</th>
+              <th>ПРОДАЖНА ЦЕНА</th>
+              <th>РЕДОВНА ЦЕНА</th>
+              <th>ЦЕНА СО ПОПУСТ</th>
+              <th>ЕДИНЕЧНА ЦЕНА</th>
+              <th>ОПИС НА ПРОИЗВОД</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Млеко 1л</td>
+              <td>79</td>
+              <td>99.00 ден.</td>
+              <td>69.00 ден.</td>
+              <td>69 ден/л</td>
+              <td>Млечни</td>
+            </tr>
+            <tr>
+              <td>Лош ред</td>
+              <td>н/а</td>
+              <td></td>
+              <td></td>
+              <td></td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+        """
+        fake_resp = MagicMock(text=html_table)
+        fake_resp.raise_for_status.return_value = None
+        with patch("backend.data.scrapers.Ramstore_scraper.requests.get", return_value=fake_resp):
+            products = ramstore.scrape_store("https://ramstore.com.mk/marketi/ramstore-vardar/")
+
+        self.assertEqual(len(products), 1)
+        self.assertEqual(products[0].name, "Млеко 1л")
+        self.assertEqual(products[0].price, 69)
+        self.assertEqual(products[0].regular_price, 99)
 
 
 if __name__ == "__main__":

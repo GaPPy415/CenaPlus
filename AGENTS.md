@@ -98,7 +98,7 @@ needs extraction).
 | `backend/data/scrapers/` | One `{Market}_scraper.py` per market (all subclass `scraper_base.MarketScraper`), auto-discovered by `run_scrapers.py` |
 | `backend/tests/` | stdlib `unittest` suite; no `__init__.py`, so run module paths |
 | `backend/data/logs/` | Per-scraper logs + `run_summary-*.json` (untracked; `*.log` is git-ignored) |
-| `frontend/` | React SPA (`src/`, `public/`, Vite/Tailwind/TS/ESLint configs, `nginx.conf`, `Dockerfile`); `frontend/src/components/ui/` holds only the 7 used shadcn/ui primitives |
+| `frontend/` | React SPA (`src/`, `public/`, Vite/Tailwind/TS/ESLint configs, `nginx.conf`, `Dockerfile`); `frontend/src/components/ui/` holds only the 3 used shadcn/ui primitives |
 | `init/` | `00_schema.sql` — the whole schema (extensions, tables, indexes, trigger, view), mounted into `docker-entrypoint-initdb.d` |
 
 Per-directory detail: `backend/data/AGENTS.md`, `backend/data/scrapers/AGENTS.md`.
@@ -135,10 +135,10 @@ tokens in `frontend/tailwind.config.ts`.
 - `frontend/src/components/Pagination.tsx` is shared by both listings (first/prev/numbered/next/last +
   go-to-page). `ProductCard` takes `showCategory` to render the main-category chip, which is what
   distinguishes a manufacturer listing (spans categories) from a subcategory listing.
-- Server state via TanStack Query (`frontend/src/lib/api.ts` is the only fetch layer); the API returns
-  `{ total, page, per_page, data }` for listings and `{ data }` for search.
+- Server state via TanStack Query (`frontend/src/lib/api.ts` is the only fetch layer); listings and
+  `/search` return `{ total, page, per_page, data }`.
 - `/search` is **pg_trgm fuzzy matching** over `groups.product_name` + manufacturer names
-  (similarity ≥ 0.8, ordered by similarity, no row cap).
+  (similarity ≥ 0.8, capped at 500 matches, paginated, with market/on-sale/sort filters).
 - Cart is frontend-only: `frontend/src/context/CartContext.tsx` persists to `localStorage["cenaplus_cart"]`.
   There is no cart API or checkout.
 - All UI copy, categories and product names are Macedonian Cyrillic. Keep new strings Cyrillic.
