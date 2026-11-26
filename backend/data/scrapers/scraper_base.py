@@ -61,6 +61,7 @@ class ScrapedProduct:
 
     name: str
     price: int
+    regular_price: int | None = None
     singular_price: str | None = None
     description: str | None = None
     in_stock: bool = True
@@ -73,6 +74,11 @@ class ScrapedProduct:
         self.name = html.unescape(self.name or "").strip()
         if self.price is not None:
             self.price = int(self.price)
+        if self.regular_price is not None:
+            self.regular_price = int(self.regular_price)
+            # Only keep regular_price when it represents an actual discount.
+            if self.price is None or self.regular_price <= self.price:
+                self.regular_price = None
 
 
 class MarketScraper(ABC):
@@ -104,6 +110,8 @@ class MarketScraper(ABC):
             in_stock = current.in_stock or incoming.in_stock
         else:
             in_stock = incoming.in_stock
+        # regular_price travels atomically with incoming.price (never backfilled
+        # from current, which may come from another store with a different price).
         return replace(
             incoming,
             in_stock=in_stock,
@@ -150,6 +158,7 @@ class MarketScraper(ABC):
                     or str(uuid.uuid4()),
                     "name": product.name,
                     "price": product.price,
+                    "regular_price": product.regular_price,
                     "singular_price": product.singular_price,
                     "description": product.description,
                     "in_stock": product.in_stock,

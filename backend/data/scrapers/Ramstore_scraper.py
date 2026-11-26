@@ -52,6 +52,20 @@ stores = [
 
 #: Column holding the discounted price, when the row has one.
 DISCOUNT_PRICE_COLUMN = 'ЦЕНА СО ПОПУСТ'
+REGULAR_PRICE_COLUMN = 'РЕДОВНА ЦЕНА'
+
+
+def _parse_int_price(value) -> int | None:
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, (int, float)):
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    match = re.search(r"(\d+)", str(value).replace(".", ""))
+    if not match:
+        return None
+    parsed = int(match.group(1))
+    return parsed if parsed > 0 else None
 
 
 def extract_dates(period):
@@ -91,13 +105,18 @@ def scrape_store(store: str) -> list[ScrapedProduct]:
             data[col] = None if pd.isna(val) else val
 
         price = int(data['ПРОДАЖНА ЦЕНА'])
+        regular_price = _parse_int_price(data.get(REGULAR_PRICE_COLUMN))
         if data.get(DISCOUNT_PRICE_COLUMN) is not None:
-            price = int(data[DISCOUNT_PRICE_COLUMN].rsplit(' ', 1)[0][:-3])
+            discount_price = int(data[DISCOUNT_PRICE_COLUMN].rsplit(' ', 1)[0][:-3])
+            if regular_price is None:
+                regular_price = price
+            price = discount_price
 
         products.append(
             ScrapedProduct(
                 name=name,
                 price=price,
+                regular_price=regular_price,
                 singular_price=data['ЕДИНЕЧНА ЦЕНА'],
                 description=data['ОПИС НА ПРОИЗВОД'],
                 # The store page only lists what is on the shelf today.

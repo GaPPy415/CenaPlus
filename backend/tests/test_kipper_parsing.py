@@ -29,6 +29,7 @@ class RowParsingTests(unittest.TestCase):
 
         self.assertEqual(product.name, "7ДЕЈС МИНИ КРОАСАН КАКАО 60г")
         self.assertEqual(product.price, 36)
+        self.assertIsNone(product.regular_price)
         self.assertEqual(product.singular_price, "1КГ=600 ден")
         self.assertEqual(product.description, "КИФЛИ И ТОРТИЧКИ")
         self.assertTrue(product.in_stock)
@@ -51,6 +52,7 @@ class RowParsingTests(unittest.TestCase):
     def test_promo_price_is_the_selling_price(self):
         product = parse_row({**SAMPLE, "product_price": "29", "product_price_normal": "36"})
         self.assertEqual(product.price, 29)
+        self.assertEqual(product.regular_price, 36)
 
 
 class UnitPriceTests(unittest.TestCase):

@@ -62,6 +62,12 @@
     --price-best: 142 55% 40%;
     --price-worst: 0 60% 55%;
 
+    --sale: 352 76% 46%;
+    --sale-foreground: 0 0% 100%;
+    --sale-soft: 352 80% 96%;
+    --sale-soft-foreground: 352 78% 36%;
+    --sale-border: 352 70% 84%;
+
     --shadow-card: 0 2px 12px -2px hsl(220 20% 10% / 0.08);
     --shadow-card-hover: 0 8px 24px -4px hsl(220 20% 10% / 0.12);
   }
@@ -86,6 +92,12 @@
     --border: 220 15% 22%;
     --input: 220 15% 22%;
     --ring: 142 55% 45%;
+
+    --sale: 352 72% 52%;
+    --sale-foreground: 0 0% 100%;
+    --sale-soft: 352 55% 20%;
+    --sale-soft-foreground: 352 90% 78%;
+    --sale-border: 352 55% 34%;
   }
 }
 

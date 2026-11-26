@@ -89,6 +89,7 @@ def parse_row(row: dict) -> ScrapedProduct | None:
     return ScrapedProduct(
         name=name,
         price=price,
+        regular_price=parse_price(row.get("product_price_normal")),
         singular_price=unit_price(row),
         description=(row.get("product_subgroup") or "").strip() or None,
         in_stock=status in ("", "D"),

@@ -19,6 +19,7 @@ import {
   MarketFilterMobileButton,
   MarketFilterMobileDrawer,
   MarketFilterSidebar,
+  OnSaleFilterButton,
 } from "@/components/MarketFilter";
 import { fetchManufacturer } from "@/lib/api";
 
@@ -49,6 +50,7 @@ const ManufacturerView = () => {
     : 12;
   const selectedSubs = params.getAll("sub").filter(Boolean);
   const selectedMarkets = params.getAll("market").filter(Boolean);
+  const onSaleOnly = params.get("on_sale") === "1";
 
   useEffect(() => {
     setFiltersOpen(false);
@@ -98,9 +100,29 @@ const ManufacturerView = () => {
     setMarkets([]);
   };
 
+  const toggleOnSale = () => {
+    const next = new URLSearchParams(params);
+    if (onSaleOnly) {
+      next.delete("on_sale");
+    } else {
+      next.set("on_sale", "1");
+    }
+    next.set("page", "1");
+    setParams(next);
+  };
+
+  const resetAllFilters = () => {
+    const next = new URLSearchParams(params);
+    next.delete("market");
+    next.delete("on_sale");
+    next.set("page", "1");
+    setParams(next);
+  };
+
   const { data, isLoading, isError, isPlaceholderData, refetch } = useQuery({
-    queryKey: ["manufacturer", name, page, perPage, selectedSubs, selectedMarkets],
-    queryFn: () => fetchManufacturer(name, page, perPage, selectedSubs, selectedMarkets),
+    queryKey: ["manufacturer", name, page, perPage, selectedSubs, selectedMarkets, onSaleOnly],
+    queryFn: () =>
+      fetchManufacturer(name, page, perPage, selectedSubs, selectedMarkets, onSaleOnly),
     enabled: Boolean(name),
     retry: 1,
     // Keep previous response mounted across filter/page changes for the SAME brand
@@ -109,7 +131,7 @@ const ManufacturerView = () => {
       previousQuery?.queryKey?.[1] === name ? previousData : undefined,
   });
 
-  const requestedFilterKey = `${name}|${page}|${perPage}|${selectedSubs.join(",")}|${selectedMarkets.join(",")}`;
+  const requestedFilterKey = `${name}|${page}|${perPage}|${selectedSubs.join(",")}|${selectedMarkets.join(",")}|${onSaleOnly ? "sale" : "all"}`;
   const renderedFilterKeyRef = useRef(requestedFilterKey);
   if (!isPlaceholderData && data) {
     renderedFilterKeyRef.current = requestedFilterKey;
@@ -169,6 +191,9 @@ const ManufacturerView = () => {
           selectedMarkets={selectedMarkets}
           onToggleMarket={toggleMarket}
           onResetMarkets={resetMarkets}
+          onSaleOnly={onSaleOnly}
+          onToggleOnSale={toggleOnSale}
+          onResetAll={resetAllFilters}
         />
 
         {/* Main centered content column */}
@@ -250,7 +275,7 @@ const ManufacturerView = () => {
       </header>
 
       {/* Controls toolbar: progressive-disclosure subcategory + mobile market toggles + count + per-page */}
-      {data && (data.total > 0 || selectedSubs.length > 0 || selectedMarkets.length > 0 || hasSubFilter || data.manufacturer.groups > 0) && (
+      {data && (data.total > 0 || selectedSubs.length > 0 || selectedMarkets.length > 0 || onSaleOnly || hasSubFilter || data.manufacturer.groups > 0) && (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             {hasSubFilter && (
@@ -285,6 +310,8 @@ const ManufacturerView = () => {
               </button>
             )}
 
+            <OnSaleFilterButton active={onSaleOnly} onToggle={toggleOnSale} />
+
             <MarketFilterMobileButton
               open={mobileMarketsOpen}
               selectedCount={selectedMarkets.length}
@@ -293,7 +320,7 @@ const ManufacturerView = () => {
             />
 
             <p className="text-sm text-muted-foreground tabular-nums">
-              {selectedSubs.length > 0 || selectedMarkets.length > 0
+              {selectedSubs.length > 0 || selectedMarkets.length > 0 || onSaleOnly
                 ? `Прикажани ${data.total} од ${data.manufacturer.groups} производи`
                 : `${data.total} производи`}
             </p>
@@ -497,11 +524,31 @@ const ManufacturerView = () => {
       {data && (
         <>
           {data.data.length === 0 ? (
-            <p className="mt-10 rounded-lg border border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-              {selectedMarkets.length > 0 || selectedSubs.length > 0
-                ? "Нема производи за избраните филтри од овој производител."
-                : "Нема производи од овој производител во моментов."}
-            </p>
+            <div className="mt-10 rounded-lg border border-border bg-muted/30 p-6 text-center">
+              <p className="text-sm text-muted-foreground">
+                {onSaleOnly
+                  ? "Моментално нема производи на акција за избраните филтри."
+                  : selectedMarkets.length > 0 || selectedSubs.length > 0
+                    ? "Нема производи за избраните филтри од овој производител."
+                    : "Нема производи од овој производител во моментов."}
+              </p>
+              {(onSaleOnly || selectedMarkets.length > 0 || selectedSubs.length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = new URLSearchParams(params);
+                    next.delete("sub");
+                    next.delete("market");
+                    next.delete("on_sale");
+                    next.set("page", "1");
+                    setParams(next);
+                  }}
+                  className="mt-3 inline-flex min-h-[38px] cursor-pointer items-center rounded-lg border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Прикажи ги сите производи
+                </button>
+              )}
+            </div>
           ) : (
             <div
               key={gridTransitionKey}

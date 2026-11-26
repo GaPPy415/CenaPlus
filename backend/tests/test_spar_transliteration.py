@@ -46,8 +46,15 @@ class RowParsingTests(unittest.TestCase):
         row = {"name": "VODA 0.5L", "category": "Water", "available": "1", "sale": "39", "regular": "49"}
         product = parse_row(row)
         self.assertEqual(product.price, 39)
+        self.assertEqual(product.regular_price, 49)
         self.assertTrue(product.in_stock)
         self.assertEqual(product.description, "Water")
+
+    def test_equal_regular_and_sale_clears_regular_price(self):
+        row = {"name": "VODA 0.5L", "category": "Water", "available": "1", "sale": "49", "regular": "49"}
+        product = parse_row(row)
+        self.assertEqual(product.price, 49)
+        self.assertIsNone(product.regular_price)
 
     def test_zero_price_rows_are_dropped(self):
         self.assertIsNone(parse_row({"name": "VODA", "available": "1", "sale": "0"}))

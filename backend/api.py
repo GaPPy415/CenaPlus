@@ -140,72 +140,34 @@ def search_products(q: str = Query(..., min_length=1)):
     return {"data": rows}
 
 
-MANUFACTURER_GROUPS_SQL = """
-    SELECT group_id,
-           group_name,
-           main_category,
-           sub_category,
-           products
-    FROM grouped_products
-    WHERE manufacturer_id = %s
-    ORDER BY group_name
-    LIMIT %s OFFSET %s
-"""
+def _build_listing_filters(
+    base_clauses: list[str],
+    base_params: list,
+    *,
+    sub_keys: list[str] | None = None,
+    markets: list[str] | None = None,
+    on_sale: bool = False,
+) -> tuple[str, list]:
+    """Assemble static WHERE predicates + bound params for grouped_products listings.
 
-MANUFACTURER_GROUPS_SUBCATEGORY_SQL = """
-    SELECT group_id,
-           group_name,
-           main_category,
-           sub_category,
-           products
-    FROM grouped_products
-    WHERE manufacturer_id = %s
-      AND (main_category || '::' || sub_category) = ANY(%s::text[])
-    ORDER BY group_name
-    LIMIT %s OFFSET %s
-"""
-
-MANUFACTURER_GROUPS_MARKET_SQL = """
-    SELECT group_id,
-           group_name,
-           main_category,
-           sub_category,
-           products
-    FROM grouped_products
-    WHERE manufacturer_id = %s
-      AND markets && %s::text[]
-    ORDER BY group_name
-    LIMIT %s OFFSET %s
-"""
-
-MANUFACTURER_COUNT_MARKET_SQL = """
-    SELECT COUNT(*)
-    FROM grouped_products
-    WHERE manufacturer_id = %s
-      AND markets && %s::text[]
-"""
-
-MANUFACTURER_GROUPS_SUBCATEGORY_MARKET_SQL = """
-    SELECT group_id,
-           group_name,
-           main_category,
-           sub_category,
-           products
-    FROM grouped_products
-    WHERE manufacturer_id = %s
-      AND (main_category || '::' || sub_category) = ANY(%s::text[])
-      AND markets && %s::text[]
-    ORDER BY group_name
-    LIMIT %s OFFSET %s
-"""
-
-MANUFACTURER_COUNT_SUBCATEGORY_MARKET_SQL = """
-    SELECT COUNT(*)
-    FROM grouped_products
-    WHERE manufacturer_id = %s
-      AND (main_category || '::' || sub_category) = ANY(%s::text[])
-      AND markets && %s::text[]
-"""
+    When both `markets` and `on_sale` are active, `sale_markets && %s::text[]`
+    ensures we match only groups that are actually discounted in at least one
+    selected market.
+    """
+    clauses = list(base_clauses)
+    params = list(base_params)
+    if sub_keys:
+        clauses.append("(main_category || '::' || sub_category) = ANY(%s::text[])")
+        params.append(sub_keys)
+    if markets and on_sale:
+        clauses.append("sale_markets && %s::text[]")
+        params.append(markets)
+    elif markets:
+        clauses.append("markets && %s::text[]")
+        params.append(markets)
+    elif on_sale:
+        clauses.append("on_sale = true")
+    return " AND ".join(clauses), params
 
 RESOLVE_MANUFACTURER_SQL = """
     WITH RECURSIVE seed AS (
@@ -284,6 +246,7 @@ def get_manufacturer_products(
     per_page: PerPage = Query(PerPage.twelve),
     sub_category: list[str] = Query(None),
     market: list[str] = Query(None),
+    on_sale: bool = Query(False),
 ):
     """All grouped products of one manufacturer, across every category."""
     # `per_page` arrives as the enum through FastAPI, but plain ints are accepted
@@ -294,6 +257,7 @@ def get_manufacturer_products(
     active_sub_filters = [s for s in raw_subs if (s or "").strip()]
     raw_markets = market if isinstance(market, (list, tuple)) else []
     active_markets = [m for m in raw_markets if (m or "").strip()]
+    only_on_sale = on_sale is True
 
     with get_cursor() as cur:
         cur.execute(RESOLVE_MANUFACTURER_SQL, (needle, needle))
@@ -304,61 +268,57 @@ def get_manufacturer_products(
         subcategories = manufacturer["subcategories"] or []
         offset = per_page_value * (page - 1)
 
-        if active_sub_filters and active_markets:
+        matched_keys: list[str] | None = None
+        precomputed_total: int | None = None
+        if active_sub_filters:
             matched_keys, sub_total = _match_manufacturer_subcategories(
                 subcategories, active_sub_filters
             )
-            if sub_total > 0:
-                cur.execute(
-                    MANUFACTURER_GROUPS_SUBCATEGORY_MARKET_SQL,
-                    (manufacturer["id"], matched_keys, active_markets, per_page_value, offset),
-                )
-                rows = cur.fetchall()
-                cur.execute(
-                    MANUFACTURER_COUNT_SUBCATEGORY_MARKET_SQL,
-                    (manufacturer["id"], matched_keys, active_markets),
-                )
-                total = cur.fetchone()["count"]
-            else:
+            if sub_total == 0:
                 total = 0
                 rows = []
-        elif active_sub_filters:
-            matched_keys, total = _match_manufacturer_subcategories(
-                subcategories, active_sub_filters
+            elif not active_markets and not only_on_sale:
+                precomputed_total = sub_total
+        elif manufacturer["groups"] == 0:
+            total = 0
+            rows = []
+        elif not active_markets and not only_on_sale:
+            precomputed_total = manufacturer["groups"]
+
+        if not (
+            (active_sub_filters and not matched_keys)
+            or (not active_sub_filters and manufacturer["groups"] == 0)
+        ):
+            where_sql, filter_params = _build_listing_filters(
+                ["manufacturer_id = %s"],
+                [manufacturer["id"]],
+                sub_keys=matched_keys,
+                markets=active_markets,
+                on_sale=only_on_sale,
             )
-            if total > 0:
-                cur.execute(
-                    MANUFACTURER_GROUPS_SUBCATEGORY_SQL,
-                    (manufacturer["id"], matched_keys, per_page_value, offset),
-                )
-                rows = cur.fetchall()
+            cur.execute(
+                f"""
+                SELECT group_id,
+                       group_name,
+                       main_category,
+                       sub_category,
+                       products
+                FROM grouped_products
+                WHERE {where_sql}
+                ORDER BY group_name
+                LIMIT %s OFFSET %s
+                """,
+                (*filter_params, per_page_value, offset),
+            )
+            rows = cur.fetchall()
+            if precomputed_total is not None:
+                total = precomputed_total
             else:
-                rows = []
-        elif active_markets:
-            if manufacturer["groups"] > 0:
                 cur.execute(
-                    MANUFACTURER_GROUPS_MARKET_SQL,
-                    (manufacturer["id"], active_markets, per_page_value, offset),
-                )
-                rows = cur.fetchall()
-                cur.execute(
-                    MANUFACTURER_COUNT_MARKET_SQL,
-                    (manufacturer["id"], active_markets),
+                    f"SELECT COUNT(*) FROM grouped_products WHERE {where_sql}",
+                    filter_params,
                 )
                 total = cur.fetchone()["count"]
-            else:
-                total = 0
-                rows = []
-        else:
-            total = manufacturer["groups"]
-            if total > 0:
-                cur.execute(
-                    MANUFACTURER_GROUPS_SQL,
-                    (manufacturer["id"], per_page_value, offset),
-                )
-                rows = cur.fetchall()
-            else:
-                rows = []
 
     return {
         "manufacturer": {
@@ -418,6 +378,7 @@ def get_product_detail(g_id: str = Query(..., description="Group id (uuid)")):
                    p.market,
                    p.name,
                    p.price,
+                   p.regular_price,
                    p.singular_price,
                    p.in_stock,
                    p.image,
@@ -468,37 +429,6 @@ def get_product_detail(g_id: str = Query(..., description="Group id (uuid)")):
     }
 
 
-SUBCATEGORY_GROUPS_SQL = """
-    SELECT group_id, group_name, main_category, sub_category, products
-    FROM grouped_products
-    WHERE main_category = %s AND sub_category = %s
-    ORDER BY group_name
-    LIMIT %s OFFSET %s
-"""
-
-SUBCATEGORY_COUNT_SQL = """
-    SELECT COUNT(*)
-    FROM grouped_products
-    WHERE main_category = %s AND sub_category = %s
-"""
-
-SUBCATEGORY_GROUPS_MARKET_SQL = """
-    SELECT group_id, group_name, main_category, sub_category, products
-    FROM grouped_products
-    WHERE main_category = %s AND sub_category = %s
-      AND markets && %s::text[]
-    ORDER BY group_name
-    LIMIT %s OFFSET %s
-"""
-
-SUBCATEGORY_COUNT_MARKET_SQL = """
-    SELECT COUNT(*)
-    FROM grouped_products
-    WHERE main_category = %s AND sub_category = %s
-      AND markets && %s::text[]
-"""
-
-
 @app.get("/{main_category}/{sub_category}")
 def get_grouped_products(
     main_category: str,
@@ -506,6 +436,7 @@ def get_grouped_products(
     page: int = Query(1, ge=1),
     per_page: PerPage = Query(PerPage.twelve),
     market: list[str] = Query(None),
+    on_sale: bool = Query(False),
 ):
     if main_category not in CATEGORIES:
         raise HTTPException(404, "Main category not found")
@@ -514,29 +445,33 @@ def get_grouped_products(
 
     per_page_value = int(getattr(per_page, "value", per_page))
     offset = per_page_value * (page - 1)
+    raw_markets = market if isinstance(market, (list, tuple)) else []
+    active_markets = [m for m in raw_markets if (m or "").strip()]
+    only_on_sale = on_sale is True
+
+    where_sql, filter_params = _build_listing_filters(
+        ["main_category = %s", "sub_category = %s"],
+        [main_category, sub_category],
+        markets=active_markets,
+        on_sale=only_on_sale,
+    )
     with get_cursor() as cur:
-        if market:
-            cur.execute(
-                SUBCATEGORY_GROUPS_MARKET_SQL,
-                (main_category, sub_category, market, per_page_value, offset),
-            )
-            rows = cur.fetchall()
-            cur.execute(
-                SUBCATEGORY_COUNT_MARKET_SQL,
-                (main_category, sub_category, market),
-            )
-            total = cur.fetchone()["count"]
-        else:
-            cur.execute(
-                SUBCATEGORY_GROUPS_SQL,
-                (main_category, sub_category, per_page_value, offset),
-            )
-            rows = cur.fetchall()
-            cur.execute(
-                SUBCATEGORY_COUNT_SQL,
-                (main_category, sub_category),
-            )
-            total = cur.fetchone()["count"]
+        cur.execute(
+            f"""
+            SELECT group_id, group_name, main_category, sub_category, products
+            FROM grouped_products
+            WHERE {where_sql}
+            ORDER BY group_name
+            LIMIT %s OFFSET %s
+            """,
+            (*filter_params, per_page_value, offset),
+        )
+        rows = cur.fetchall()
+        cur.execute(
+            f"SELECT COUNT(*) FROM grouped_products WHERE {where_sql}",
+            filter_params,
+        )
+        total = cur.fetchone()["count"]
 
     return {
         "total": total,

@@ -190,6 +190,7 @@ class KamScraper(MarketScraper):
             ScrapedProduct(
                 name=name,
                 price=value[0],
+                regular_price=value[2] if len(value) > 2 else None,
                 singular_price=value[1],
                 # A published price list only lists what is on the shelf today.
                 in_stock=True,

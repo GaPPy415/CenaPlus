@@ -20,6 +20,8 @@ from typing import List, Dict
 
 NAME_KEYWORDS = ("назив", "стока", "производ")
 PRICE_KEYWORDS = ("продажна", "продажна цена", "цена")
+REGULAR_PRICE_KEYWORDS = ("редовна цена", "редовна")
+DISCOUNT_PRICE_KEYWORDS = ("цена со попуст",)
 DESC_KEYWORDS = ("опис", "опис на стока")
 SINGULAR_KEYWORDS = ("единечна", "единечна цена", "единична", "единична цена")
 
@@ -67,6 +69,8 @@ def extract_name_price_with_camelot(pdf_path: str) -> List[Dict]:
             headers = df.iloc[0].tolist()
             name_col = _col_index_from_headers(headers, NAME_KEYWORDS)
             price_col = _col_index_from_headers(headers, PRICE_KEYWORDS)
+            reg_col = _col_index_from_headers(headers, REGULAR_PRICE_KEYWORDS)
+            disc_col = _col_index_from_headers(headers, DISCOUNT_PRICE_KEYWORDS)
             desc_col = _col_index_from_headers(headers, DESC_KEYWORDS)
             sing_col = _col_index_from_headers(headers, SINGULAR_KEYWORDS)
 
@@ -75,6 +79,12 @@ def extract_name_price_with_camelot(pdf_path: str) -> List[Dict]:
                 try:
                     name = str(row[name_col]).replace('\n', ' ').strip() if name_col is not None else None
                     price = _clean_price(row[price_col]) if price_col is not None else None
+                    regular_price = _clean_price(row[reg_col]) if reg_col is not None else None
+                    discount_price = _clean_price(row[disc_col]) if disc_col is not None else None
+                    if price is not None and discount_price is not None and 0 < discount_price < price:
+                        if regular_price is None:
+                            regular_price = price
+                        price = discount_price
                     description = str(row[desc_col]).replace('\n', ' ').strip() if desc_col is not None else ""
                     singular_price = None
                     if sing_col is not None:
@@ -85,7 +95,12 @@ def extract_name_price_with_camelot(pdf_path: str) -> List[Dict]:
 
                 if name and price is not None:
                     full_name = f"{name} - {description}" if description else name
-                    results.append({"name": full_name, "price": price, "singular_price": singular_price})
+                    results.append({
+                        "name": full_name,
+                        "price": price,
+                        "singular_price": singular_price,
+                        "regular_price": regular_price,
+                    })
         if results:
             return results
     return results
@@ -108,6 +123,8 @@ def extract_name_price_with_pdfplumber(pdf_path: str) -> List[Dict]:
                 headers = [str(x or "").strip() for x in table[0]]
                 name_col = _col_index_from_headers(headers, NAME_KEYWORDS)
                 price_col = _col_index_from_headers(headers, PRICE_KEYWORDS)
+                reg_col = _col_index_from_headers(headers, REGULAR_PRICE_KEYWORDS)
+                disc_col = _col_index_from_headers(headers, DISCOUNT_PRICE_KEYWORDS)
                 desc_col = _col_index_from_headers(headers, DESC_KEYWORDS)
                 sing_col = _col_index_from_headers(headers, SINGULAR_KEYWORDS)
                 start = 1 if (name_col is not None and price_col is not None) else 0
@@ -115,6 +132,12 @@ def extract_name_price_with_pdfplumber(pdf_path: str) -> List[Dict]:
                     try:
                         name = str(row[name_col]).strip() if name_col is not None and name_col < len(row) else None
                         price = _clean_price(row[price_col]) if price_col is not None and price_col < len(row) else None
+                        regular_price = _clean_price(row[reg_col]) if reg_col is not None and reg_col < len(row) else None
+                        discount_price = _clean_price(row[disc_col]) if disc_col is not None and disc_col < len(row) else None
+                        if price is not None and discount_price is not None and 0 < discount_price < price:
+                            if regular_price is None:
+                                regular_price = price
+                            price = discount_price
                         description = str(row[desc_col]).strip() if desc_col is not None and desc_col < len(row) else ""
                         singular_price = None
                         if sing_col is not None and sing_col < len(row):
@@ -127,7 +150,12 @@ def extract_name_price_with_pdfplumber(pdf_path: str) -> List[Dict]:
                         name = name.replace('\n', ' ').strip()
                         description = description.replace('\n', ' ').strip()
                         full_name = f"{name} - {description}" if description else name
-                        results.append({"name": full_name, "price": price, "singular_price": singular_price})
+                        results.append({
+                            "name": full_name,
+                            "price": price,
+                            "singular_price": singular_price,
+                            "regular_price": regular_price,
+                        })
     return results
 
 def extract_name_price(pdf_path: str) -> Dict:
@@ -137,7 +165,7 @@ def extract_name_price(pdf_path: str) -> Dict:
         rows = extract_name_price_with_pdfplumber(pdf_path)
     result = {}
     for row in rows:
-        result[row["name"]] = [row["price"], row["singular_price"]]
+        result[row["name"]] = [row["price"], row["singular_price"], row.get("regular_price")]
     print(f"Extracted {len(result)} products from {pdf_path} in {round(time.time() - start, 2)} seconds.")
     return result
 

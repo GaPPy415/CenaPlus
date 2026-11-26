@@ -10,9 +10,17 @@ import {
 import { Button } from "@/components/ui/button";
 
 import { MARKET_INFO } from "@/lib/categories";
+import { getDiscountPercent } from "@/lib/sale";
 
 const CartSidebar = () => {
   const { items, updateQuantity, removeItem, totalPrice, totalItems } = useCart();
+  const totalSaleSavings = items.reduce((sum, item) => {
+    const reg = item.product.regular_price;
+    if (typeof reg === "number" && reg > item.product.price) {
+      return sum + (reg - item.product.price) * item.quantity;
+    }
+    return sum;
+  }, 0);
 
   return (
     <Sheet>
@@ -97,9 +105,19 @@ const CartSidebar = () => {
                           <Plus className="h-3 w-3" />
                         </Button>
                       </div>
-                      <p className="font-semibold text-sm">
-                        {(item.product.price * item.quantity).toFixed(0)} ден.
-                      </p>
+                      <div className="flex flex-col items-end text-right tabular-nums">
+                        {getDiscountPercent(item.product.price, item.product.regular_price) !== null && (
+                          <del
+                            className="text-[11px] leading-none text-muted-foreground/80"
+                            aria-label={`Редовна цена ${((item.product.regular_price as number) * item.quantity).toFixed(0)} ден.`}
+                          >
+                            {((item.product.regular_price as number) * item.quantity).toFixed(0)} ден.
+                          </del>
+                        )}
+                        <p className="text-sm font-semibold">
+                          {(item.product.price * item.quantity).toFixed(0)} ден.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </li>
@@ -109,8 +127,14 @@ const CartSidebar = () => {
         </div>
 
         {items.length > 0 && (
-          <div className="border-t border-border pt-4 mt-auto">
-            <div className="flex items-center justify-between font-semibold text-lg">
+          <div className="mt-auto space-y-1.5 border-t border-border pt-4">
+            {totalSaleSavings > 0 && (
+              <div className="flex items-center justify-between text-xs font-medium tabular-nums text-sale-soft-foreground">
+                <span>Заштеда од акции:</span>
+                <span>-{totalSaleSavings.toFixed(0)} ден.</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-lg font-semibold tabular-nums">
               <span>Вкупно:</span>
               <span>{totalPrice.toFixed(0)} ден.</span>
             </div>

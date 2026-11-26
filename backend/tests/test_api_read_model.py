@@ -257,8 +257,87 @@ class ApiReadModelTests(unittest.TestCase):
         self.assertEqual(str(detail["group"]["group_id"]), str(first["group_id"]))
         self.assertGreater(detail["stats"]["in_stock"], 0)
         for offer in detail["offers"]:
+            self.assertIn("regular_price", offer)
             self.assertIn("market_last_updated", offer)
             self.assertIsNotNone(offer["market_last_updated"])
+
+    def test_on_sale_filter_parity(self):
+        main_cat = "Дом и домаќинство"
+        sub_cat = "Кујнски прибор и садови"
+        markets = ["reptil", "vero"]
+
+        sale_sub = get_grouped_products(main_cat, sub_cat, page=1, per_page=12, on_sale=True)
+        sale_sub_mkt = get_grouped_products(
+            main_cat, sub_cat, page=1, per_page=12, market=markets, on_sale=True
+        )
+        sale_mfr = get_manufacturer_products("др еткер", page=1, per_page=12, on_sale=True)
+        sale_mfr_mkt = get_manufacturer_products(
+            "др еткер", page=1, per_page=12, market=markets, on_sale=True
+        )
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM groups g
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE g.main_category = %s AND g.sub_category = %s
+                  AND p.regular_price IS NOT NULL
+                """,
+                (main_cat, sub_cat),
+            )
+            self.assertEqual(sale_sub["total"], cur.fetchone()[0])
+
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM groups g
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE g.main_category = %s AND g.sub_category = %s
+                  AND p.market = ANY(%s)
+                  AND p.regular_price IS NOT NULL
+                """,
+                (main_cat, sub_cat, markets),
+            )
+            self.assertEqual(sale_sub_mkt["total"], cur.fetchone()[0])
+
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM manufacturers m
+                JOIN groups g ON g.manufacturer_id = m.id
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE m.canonical_name = %s
+                  AND p.regular_price IS NOT NULL
+                """,
+                (sale_mfr["manufacturer"]["name"],),
+            )
+            self.assertEqual(sale_mfr["total"], cur.fetchone()[0])
+
+            cur.execute(
+                """
+                SELECT count(DISTINCT g.id)
+                FROM manufacturers m
+                JOIN groups g ON g.manufacturer_id = m.id
+                JOIN products p ON p.group_id = g.id AND p.in_stock = true
+                WHERE m.canonical_name = %s
+                  AND p.market = ANY(%s)
+                  AND p.regular_price IS NOT NULL
+                """,
+                (sale_mfr_mkt["manufacturer"]["name"], markets),
+            )
+            self.assertEqual(sale_mfr_mkt["total"], cur.fetchone()[0])
+
+        for row in sale_sub["data"] + sale_mfr["data"]:
+            self.assertEqual(set(row.keys()), EXPECTED_GROUP_KEYS)
+            self.assertTrue(any(p.get("regular_price") is not None for p in row["products"]))
+        for row in sale_sub_mkt["data"] + sale_mfr_mkt["data"]:
+            self.assertTrue(
+                any(
+                    p["market"] in markets and p.get("regular_price") is not None
+                    for p in row["products"]
+                )
+            )
 
     def test_concurrent_refresh_read_views(self):
         refreshed = refresh_read_views(self.conn, concurrently=True)

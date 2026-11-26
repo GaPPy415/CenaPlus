@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ExternalLink,
   ImageOff,
+  Percent,
   RefreshCw,
   Store,
   TrendingDown,
@@ -14,6 +15,7 @@ import {
 
 import { MARKET_INFO } from "@/lib/categories";
 import { fetchProductDetail, type ProductOffer } from "@/lib/api";
+import { getDiscountPercent, getGroupSaleSummary } from "@/lib/sale";
 
 const UNIT_LABELS: Record<string, string> = {
   g: "г",
@@ -37,12 +39,24 @@ const formatDate = (value: string | null) => {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString("mk-MK");
 };
 
+const formatDateTime = (value: string | null) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+};
+
 const marketOf = (key: string) =>
   MARKET_INFO[key] ?? { name: key, color: "hsl(var(--muted-foreground))" };
 
 const OfferRow = ({ offer }: { offer: ProductOffer }) => {
   const market = marketOf(offer.market);
   const updated = formatDate(offer.last_updated);
+  const marketUpdated = formatDateTime(offer.market_last_updated);
+  const discountPct = offer.in_stock ? getDiscountPercent(offer.price, offer.regular_price) : null;
 
   return (
     <li className="price-row gap-3">
@@ -76,9 +90,28 @@ const OfferRow = ({ offer }: { offer: ProductOffer }) => {
       </a>
 
       <div className="flex flex-shrink-0 flex-col items-end text-right">
-        <span className="text-sm font-semibold tabular-nums text-card-foreground">
-          {offer.price} ден.
-        </span>
+        <div className="flex flex-wrap items-baseline justify-end gap-1.5">
+          {discountPct !== null && (
+            <>
+              <span className="inline-flex items-center rounded-full border border-sale-border bg-sale-soft px-1.5 py-0.5 text-[11px] font-semibold leading-none tabular-nums text-sale-soft-foreground">
+                -{discountPct}%
+              </span>
+              <del
+                className="text-xs tabular-nums text-muted-foreground/80"
+                aria-label={`Редовна цена ${offer.regular_price} ден.`}
+              >
+                {offer.regular_price} ден.
+              </del>
+            </>
+          )}
+          <span
+            className={`text-sm font-semibold tabular-nums ${
+              discountPct !== null ? "text-sale-soft-foreground" : "text-card-foreground"
+            }`}
+          >
+            {offer.price} ден.
+          </span>
+        </div>
         {offer.singular_price && (
           <span className="text-xs tabular-nums text-muted-foreground">{offer.singular_price}</span>
         )}
@@ -96,6 +129,15 @@ const OfferRow = ({ offer }: { offer: ProductOffer }) => {
           )}
           {updated && <span className="text-muted-foreground/70">· {updated}</span>}
         </span>
+        {marketUpdated && (
+          <span
+            className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground/80"
+            title={`Последно ажурирање на цените во ${market.name}`}
+          >
+            <RefreshCw className="h-3 w-3" aria-hidden="true" />
+            Ажурирано {marketUpdated}
+          </span>
+        )}
       </div>
     </li>
   );
@@ -177,6 +219,7 @@ const ProductDetail = () => {
   const { group, offers, stats } = data;
   const available = offers.filter((offer) => offer.in_stock);
   const unavailable = offers.filter((offer) => !offer.in_stock);
+  const saleSummary = getGroupSaleSummary(available);
   const image = offers.find((offer) => offer.image)?.image;
   const quantity = formatQuantity(group.quantity_value, group.quantity_unit);
   const categoryHref = `/?category=${encodeURIComponent(group.main_category)}&sub=${encodeURIComponent(group.sub_category)}`;
@@ -240,6 +283,12 @@ const ProductDetail = () => {
             {quantity && (
               <span className="rounded-full border border-border bg-muted/50 px-2.5 py-0.5 text-xs font-medium tabular-nums text-foreground">
                 {quantity}
+              </span>
+            )}
+            {saleSummary && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-sale-border bg-sale-soft px-2.5 py-0.5 text-xs font-semibold tabular-nums text-sale-soft-foreground">
+                <Percent className="h-3 w-3" aria-hidden="true" />
+                На акција · {saleSummary.label}
               </span>
             )}
             {group.kratok_rok && (

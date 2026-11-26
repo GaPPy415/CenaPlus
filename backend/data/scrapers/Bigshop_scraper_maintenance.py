@@ -42,10 +42,14 @@ def parse_product(product: dict) -> ScrapedProduct:
     images = product.get('images', [])
     categories = [cat['name'] for cat in product.get('categories', [])]
 
+    regular_raw = prices.get('regular_price')
+    regular_price = parse_price(regular_raw, minor_unit) if regular_raw else None
+
     return ScrapedProduct(
         name=html.unescape(product.get('name', '')),
         # 'price' covers both regular and sale prices.
         price=parse_price(prices.get('price', '0'), minor_unit),
+        regular_price=regular_price or None,
         singular_price=parse_singular_price(product.get('price_html', '')),
         description=str(categories) if categories else None,
         in_stock=bool(product.get('is_in_stock')),

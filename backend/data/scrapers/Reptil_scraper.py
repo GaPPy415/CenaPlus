@@ -21,6 +21,16 @@ def parse_price(price_str: str, minor_unit: int) -> int:
     return int(price_str) // (10 ** minor_unit)
 
 
+def parse_optional_price(price_str: str | None, minor_unit: int) -> int | None:
+    if not price_str:
+        return None
+    try:
+        value = parse_price(price_str, minor_unit)
+        return value if value > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
 def parse_singular_price(price_html: str) -> str | None:
     """Extract the per-unit price string from price_html, e.g. '128 ден/kg'"""
     try:
@@ -48,6 +58,7 @@ def parse_product(item: dict) -> ScrapedProduct:
     return ScrapedProduct(
         name=html.unescape(item.get('name', '')),
         price=parse_price(prices.get('price', '0'), minor_unit),
+        regular_price=parse_optional_price(prices.get('regular_price'), minor_unit),
         singular_price=parse_singular_price(item.get('price_html', '')),
         description=str(categories) if categories else None,
         in_stock=bool(item.get('is_in_stock')),

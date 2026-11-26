@@ -8,6 +8,7 @@ import {
   MarketFilterMobileButton,
   MarketFilterMobileDrawer,
   MarketFilterSidebar,
+  OnSaleFilterButton,
 } from "@/components/MarketFilter";
 
 interface Props {
@@ -21,11 +22,13 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState<12 | 24 | 36>(12);
   const [selectedMarkets, setSelectedMarkets] = useState<string[]>([]);
+  const [onSaleOnly, setOnSaleOnly] = useState(false);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   useEffect(() => {
     setPage(1);
     setSelectedMarkets([]);
+    setOnSaleOnly(false);
     setMobileFiltersOpen(false);
   }, [mainCategory, subCategory]);
 
@@ -41,9 +44,21 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
     setPage(1);
   };
 
+  const toggleOnSale = () => {
+    setOnSaleOnly((prev) => !prev);
+    setPage(1);
+  };
+
+  const resetAllFilters = () => {
+    setSelectedMarkets([]);
+    setOnSaleOnly(false);
+    setPage(1);
+  };
+
   const { data, isLoading, error, isPlaceholderData } = useQuery({
-    queryKey: ["products", mainCategory, subCategory, page, perPage, selectedMarkets],
-    queryFn: () => fetchProducts(mainCategory, subCategory, page, perPage, selectedMarkets),
+    queryKey: ["products", mainCategory, subCategory, page, perPage, selectedMarkets, onSaleOnly],
+    queryFn: () =>
+      fetchProducts(mainCategory, subCategory, page, perPage, selectedMarkets, onSaleOnly),
     // Keep previous list mounted when toggling markets or paginating inside the
     // same subcategory so the page never flashes a spinner or collapses height.
     placeholderData: (previousData, previousQuery) =>
@@ -53,7 +68,7 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
         : undefined,
   });
 
-  const requestedFilterKey = `${mainCategory}|${subCategory}|${page}|${perPage}|${selectedMarkets.join(",")}`;
+  const requestedFilterKey = `${mainCategory}|${subCategory}|${page}|${perPage}|${selectedMarkets.join(",")}|${onSaleOnly ? "sale" : "all"}`;
   const renderedFilterKeyRef = useRef(requestedFilterKey);
   if (!isPlaceholderData && data) {
     renderedFilterKeyRef.current = requestedFilterKey;
@@ -78,6 +93,9 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
           selectedMarkets={selectedMarkets}
           onToggleMarket={toggleMarket}
           onResetMarkets={resetMarkets}
+          onSaleOnly={onSaleOnly}
+          onToggleOnSale={toggleOnSale}
+          onResetAll={resetAllFilters}
         />
 
         {/* Main centered content column */}
@@ -97,7 +115,8 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Mobile/tablet (< lg) progressive-disclosure market filter toggle */}
+              {/* Mobile/tablet (< lg) 1-tap on-sale toggle + progressive-disclosure market filter */}
+              <OnSaleFilterButton active={onSaleOnly} onToggle={toggleOnSale} />
               <MarketFilterMobileButton
                 open={mobileFiltersOpen}
                 selectedCount={selectedMarkets.length}
@@ -176,9 +195,22 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
           {data && (
             <>
               {data.data.length === 0 ? (
-                <p className="rounded-lg border border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-                  Нема производи за избраните продавници во оваа поткатегорија.
-                </p>
+                <div className="rounded-lg border border-border bg-muted/30 p-6 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {onSaleOnly
+                      ? "Моментално нема производи на акција за избраните филтри."
+                      : "Нема производи за избраните продавници во оваа поткатегорија."}
+                  </p>
+                  {(onSaleOnly || selectedMarkets.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={resetAllFilters}
+                      className="mt-3 inline-flex min-h-[38px] cursor-pointer items-center rounded-lg border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      Прикажи ги сите производи
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div
                   key={gridTransitionKey}

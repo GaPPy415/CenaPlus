@@ -53,10 +53,18 @@ def parse_page(content: bytes) -> list[ScrapedProduct]:
             except ValueError:
                 continue  # Skip if price is not a valid integer
 
+            regular_price = None
+            if len(cols) > 5 and cols[5]:
+                try:
+                    regular_price = int(cols[5])
+                except ValueError:
+                    regular_price = None
+
             products.append(
                 ScrapedProduct(
                     name=cols[0],
                     price=price,
+                    regular_price=regular_price,
                     singular_price=cols[2],
                     description=cols[4],
                     in_stock=cols[3] == 'Да',

@@ -4,6 +4,7 @@ export interface Product {
   product_id: string;
   name: string;
   price: number;
+  regular_price?: number | null;
   singular_price: string | null;
   market: string;
   in_stock: boolean;
@@ -36,6 +37,7 @@ export interface ProductOffer {
   market: string;
   name: string;
   price: number;
+  regular_price: number | null;
   singular_price: string | null;
   in_stock: boolean;
   image: string | null;
@@ -77,11 +79,15 @@ export async function fetchProducts(
   subCategory: string,
   page = 1,
   perPage: 12 | 24 | 36 = 12,
-  markets: string[] = []
+  markets: string[] = [],
+  onSale = false
 ): Promise<ProductsResponse> {
   let url = `${API_BASE}/${encodeURIComponent(mainCategory)}/${encodeURIComponent(subCategory)}?page=${page}&per_page=${perPage}`;
   for (const m of markets) {
     url += `&market=${encodeURIComponent(m)}`;
+  }
+  if (onSale) {
+    url += `&on_sale=true`;
   }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch products: ${res.status}`);
@@ -122,7 +128,8 @@ export async function fetchManufacturer(
   page = 1,
   perPage: 12 | 24 | 36 = 12,
   subCategories: string[] = [],
-  markets: string[] = []
+  markets: string[] = [],
+  onSale = false
 ): Promise<ManufacturerListing> {
   let url = `${API_BASE}/manufacturer?manufacturer_name=${encodeURIComponent(manufacturerName)}&page=${page}&per_page=${perPage}`;
   for (const sc of subCategories) {
@@ -130,6 +137,9 @@ export async function fetchManufacturer(
   }
   for (const m of markets) {
     url += `&market=${encodeURIComponent(m)}`;
+  }
+  if (onSale) {
+    url += `&on_sale=true`;
   }
   const res = await fetch(url);
   if (res.status === 404) throw new Error("Manufacturer not found");

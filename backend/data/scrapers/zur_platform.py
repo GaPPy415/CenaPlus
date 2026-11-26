@@ -65,11 +65,14 @@ def parse_row(cells) -> ScrapedProduct | None:
     if price is None:
         return None
 
+    regular_price = parse_price(cells[6].get_text(" ", strip=True))
+
     # "Опис на стока" is a literal "/" on every row, so there is no category or
     # description to carry over.
     return ScrapedProduct(
         name=cells[1].get_text(" ", strip=True),
         price=price,
+        regular_price=regular_price,
         singular_price=cells[3].get_text(" ", strip=True) or None,
         in_stock="да" in cells[5].get_text(" ", strip=True).lower(),
     )

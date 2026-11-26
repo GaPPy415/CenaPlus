@@ -70,9 +70,12 @@ def parse_row(cells) -> ScrapedProduct | None:
     if price is None:
         return None
 
+    regular_price = parse_price(cells[5].text.strip()) if len(cells) > 5 else None
+
     return ScrapedProduct(
         name=cells[0].text.strip(),
         price=price,
+        regular_price=regular_price,
         singular_price=cells[2].text.strip(),
         description=cells[3].text.strip(),
         in_stock="Да" in cells[4].text.strip(),

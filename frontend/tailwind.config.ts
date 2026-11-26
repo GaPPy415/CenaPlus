@@ -36,6 +36,13 @@ export default {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        sale: {
+          DEFAULT: "hsl(var(--sale))",
+          foreground: "hsl(var(--sale-foreground))",
+          soft: "hsl(var(--sale-soft))",
+          "soft-foreground": "hsl(var(--sale-soft-foreground))",
+          border: "hsl(var(--sale-border))",
+        },
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",

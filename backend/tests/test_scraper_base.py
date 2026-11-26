@@ -72,6 +72,23 @@ class CollectTests(unittest.TestCase):
     def test_price_is_coerced_to_int(self):
         self.assertEqual(ScrapedProduct(name="X", price="120").price, 120)
 
+    def test_regular_price_is_only_kept_when_strictly_higher_than_price(self):
+        self.assertEqual(ScrapedProduct(name="A", price=89, regular_price="119").regular_price, 119)
+        self.assertIsNone(ScrapedProduct(name="B", price=119, regular_price=119).regular_price)
+        self.assertIsNone(ScrapedProduct(name="C", price=119, regular_price=99).regular_price)
+        self.assertIsNone(ScrapedProduct(name="D", price=119, regular_price=None).regular_price)
+
+    def test_merge_does_not_backfill_regular_price_from_earlier_store(self):
+        scraper = _FakeScraper(
+            [
+                ScrapedProduct(name="Млеко", price=89, regular_price=119),
+                ScrapedProduct(name="Млеко", price=119, regular_price=None),
+            ]
+        )
+        product = scraper.collect()[0]
+        self.assertEqual(product.price, 119)
+        self.assertIsNone(product.regular_price)
+
 
 class BuildRowsTests(unittest.TestCase):
     def test_reuses_existing_id_and_stamps_both_timestamps(self):
@@ -91,11 +108,12 @@ class BuildRowsTests(unittest.TestCase):
         self.assertEqual(
             set(rows[0]),
             {
-                "id", "name", "price", "singular_price", "description",
+                "id", "name", "price", "regular_price", "singular_price", "description",
                 "in_stock", "image", "link", "market", "ETL_loadtime",
                 "last_updated",
             },
         )
+        self.assertIsNone(rows[0]["regular_price"])
 
     def test_new_product_gets_a_uuid(self):
         rows = _FakeScraper([]).build_rows(

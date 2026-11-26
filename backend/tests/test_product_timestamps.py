@@ -21,7 +21,7 @@ UNCHANGED_TS = datetime(2026, 1, 2, 8, 0, 0)
 CHANGED_TS = datetime(2026, 1, 3, 8, 0, 0)
 
 COLUMNS = [
-    "id", "name", "price", "singular_price", "description", "in_stock",
+    "id", "name", "price", "regular_price", "singular_price", "description", "in_stock",
     "image", "link", "market", "ETL_loadtime", "last_updated",
 ]
 
@@ -47,6 +47,7 @@ class TimestampTests(unittest.TestCase):
                 id             uuid PRIMARY KEY,
                 name           text,
                 price          integer,
+                regular_price  integer,
                 singular_price text,
                 description    text,
                 in_stock       boolean,
@@ -74,6 +75,7 @@ class TimestampTests(unittest.TestCase):
             "id": self.row_id,
             "name": "Млеко 1л",
             "price": 50,
+            "regular_price": None,
             "singular_price": "50 ден/л",
             "description": "Млечни производи",
             "in_stock": True,
@@ -194,6 +196,65 @@ class TimestampTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bulk_upsert_products_table(self.conn, [self._payload()], table="products; DROP TABLE x")
 
+    def test_sale_start_and_expiration_clears_regular_price(self):
+        self._reset()
+        # 1. Initial scrape: on sale (40 down from 50)
+        bulk_upsert_products_table(
+            self.conn,
+            [self._payload(price=40, regular_price=50)],
+            table=TABLE,
+        )
+        self.cursor.execute(
+            f"SELECT etl_loadtime, last_updated, price, regular_price FROM {TABLE} WHERE id = %s",
+            (self.row_id,),
+        )
+        etl, updated, price, reg = self.cursor.fetchone()
+        self.assertEqual((price, reg), (40, 50))
+        self.assertEqual(etl, OLD_TS)
+
+        # 2. Sale ends: regular_price returns to None, price returns to 50
+        bulk_upsert_products_table(
+            self.conn,
+            [
+                self._payload(
+                    price=50,
+                    regular_price=None,
+                    ETL_loadtime=CHANGED_TS,
+                    last_updated=CHANGED_TS,
+                )
+            ],
+            table=TABLE,
+        )
+        self.cursor.execute(
+            f"SELECT etl_loadtime, last_updated, price, regular_price FROM {TABLE} WHERE id = %s",
+            (self.row_id,),
+        )
+        etl2, updated2, price2, reg2 = self.cursor.fetchone()
+        self.assertEqual(etl2, OLD_TS)
+        self.assertEqual(updated2, CHANGED_TS)
+        self.assertEqual(price2, 50)
+        self.assertIsNone(reg2)
+
+        # 3. Edge case: sale ends while price stays the same (regular_price 60 -> None)
+        bulk_upsert_products_table(
+            self.conn,
+            [self._payload(price=50, regular_price=60, ETL_loadtime=OLD_TS, last_updated=UNCHANGED_TS)],
+            table=TABLE,
+        )
+        bulk_upsert_products_table(
+            self.conn,
+            [self._payload(price=50, regular_price=None, ETL_loadtime=CHANGED_TS, last_updated=CHANGED_TS)],
+            table=TABLE,
+        )
+        self.cursor.execute(
+            f"SELECT last_updated, price, regular_price FROM {TABLE} WHERE id = %s",
+            (self.row_id,),
+        )
+        updated3, price3, reg3 = self.cursor.fetchone()
+        self.assertEqual(updated3, CHANGED_TS)
+        self.assertEqual(price3, 50)
+        self.assertIsNone(reg3)
+
 
 class TimestampTriggerTests(unittest.TestCase):
     """The DB trigger must enforce the same rules for direct writes.
@@ -222,6 +283,7 @@ class TimestampTriggerTests(unittest.TestCase):
                 id             uuid PRIMARY KEY,
                 name           text,
                 price          integer,
+                regular_price  integer,
                 singular_price text,
                 description    text,
                 in_stock       boolean,

@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS public.products (
     name                  text,
     description           text,
     price                 integer,
+    regular_price         integer,
     singular_price        text,
     in_stock              boolean,
     image                 text,
@@ -96,7 +97,9 @@ CREATE TABLE IF NOT EXISTS public.products (
     CONSTRAINT products_manufacturer_id_fkey
         FOREIGN KEY (manufacturer_id) REFERENCES public.manufacturers(id),
     CONSTRAINT products_quantity_unit_chk
-        CHECK (quantity_unit IS NULL OR quantity_unit = ANY (ARRAY['g', 'kg', 'ml', 'l', 'pcs']))
+        CHECK (quantity_unit IS NULL OR quantity_unit = ANY (ARRAY['g', 'kg', 'ml', 'l', 'pcs'])),
+    CONSTRAINT products_regular_price_chk
+        CHECK (regular_price IS NULL OR (price IS NOT NULL AND regular_price > price))
 );
 
 -- ---------------------------------------------------------------------------
@@ -136,10 +139,10 @@ BEGIN
     -- First-seen time is immutable once the row exists.
     NEW.etl_loadtime := OLD.etl_loadtime;
 
-    IF (NEW.name, NEW.description, NEW.price, NEW.singular_price,
+    IF (NEW.name, NEW.description, NEW.price, NEW.regular_price, NEW.singular_price,
         NEW.in_stock, NEW.image, NEW.link, NEW.market)
        IS DISTINCT FROM
-       (OLD.name, OLD.description, OLD.price, OLD.singular_price,
+       (OLD.name, OLD.description, OLD.price, OLD.regular_price, OLD.singular_price,
         OLD.in_stock, OLD.image, OLD.link, OLD.market)
     THEN
         -- Keep the writer's timestamp; only invent one when the statement
@@ -180,6 +183,10 @@ CREATE INDEX IF NOT EXISTS idx_groups_manufacturer_id
 CREATE INDEX IF NOT EXISTS idx_products_group_id
     ON public.products USING btree (group_id)
     WHERE group_id IS NOT NULL;
+
+-- /product per-market "last updated" (MAX(last_updated) per market, index-only)
+CREATE INDEX IF NOT EXISTS idx_products_market_last_updated
+    ON public.products USING btree (market, last_updated);
 
 -- feature extraction work queue
 CREATE INDEX IF NOT EXISTS idx_products_features_pending
@@ -258,10 +265,16 @@ SELECT g.id AS group_id,
        g.manufacturer_id,
        array_agg(DISTINCT p.market) AS markets,
        min(p.price) AS min_price,
+       bool_or(p.regular_price IS NOT NULL) AS on_sale,
+       COALESCE(
+           array_agg(DISTINCT p.market) FILTER (WHERE p.regular_price IS NOT NULL),
+           '{}'::text[]
+       ) AS sale_markets,
        json_agg(json_build_object(
            'product_id', p.id,
            'name', p.name,
            'price', p.price,
+           'regular_price', p.regular_price,
            'market', p.market,
            'in_stock', p.in_stock,
            'image', p.image,
@@ -279,17 +292,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_grouped_products_group_id
     ON public.grouped_products USING btree (group_id);
 
 -- /manufacturer hot path: pure ordered range scan, zero join, zero sort;
--- INCLUDE (main_category, sub_category) keeps subcategory-filtered scans index-only until LIMIT
+-- INCLUDE keeps subcategory/market/sale-filtered scans index-only until LIMIT
 CREATE INDEX IF NOT EXISTS idx_grouped_products_manufacturer_name
     ON public.grouped_products USING btree (manufacturer_id, group_name)
-    INCLUDE (main_category, sub_category)
+    INCLUDE (main_category, sub_category, markets, on_sale, sale_markets)
     WHERE manufacturer_id IS NOT NULL;
 
--- /{main}/{sub} hot path: covering index with INCLUDE (markets) for index-only counts
--- and market-filtered page slices without JSON deserialization
+-- /{main}/{sub} hot path: covering index with INCLUDE for index-only counts
+-- and market/sale-filtered page slices without JSON deserialization
 CREATE INDEX IF NOT EXISTS idx_grouped_products_category_name
     ON public.grouped_products USING btree (main_category, sub_category, group_name)
-    INCLUDE (markets);
+    INCLUDE (markets, on_sale, sale_markets);
 
 -- O(1) manufacturer header stats (groups, categories, markets, subcategories)
 CREATE MATERIALIZED VIEW IF NOT EXISTS public.manufacturer_stats AS
@@ -334,7 +347,8 @@ sub_agg AS (
 ),
 market_counts AS (
     SELECT g.manufacturer_id,
-           count(DISTINCT p.market)::int AS markets
+           count(DISTINCT p.market)::int AS markets,
+           max(p.last_updated) AS last_updated
     FROM public.groups g
     JOIN public.products p ON p.group_id = g.id
     WHERE g.manufacturer_id IS NOT NULL
@@ -345,6 +359,7 @@ SELECT b.manufacturer_id,
        b.groups,
        b.categories,
        COALESCE(mc.markets, 0)::int AS markets,
+       mc.last_updated,
        COALESCE(sa.subcategories, '[]'::jsonb) AS subcategories
 FROM base_counts b
 LEFT JOIN sub_agg sa ON sa.manufacturer_id = b.manufacturer_id

@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { MARKET_INFO } from "@/lib/categories";
 import type { GroupedProduct } from "@/lib/api";
-import { ArrowRight, ChevronRight, ExternalLink, ImageOff, Minus, Plus, ShoppingCart } from "lucide-react";
+import { getDiscountPercent, getGroupSaleSummary } from "@/lib/sale";
+import { ArrowRight, ChevronRight, ExternalLink, ImageOff, Minus, Percent, Plus, ShoppingCart } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 
 interface ProductCardProps {
@@ -15,6 +16,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
   const sorted = [...group.products].sort((a, b) => a.price - b.price);
   const bestPrice = sorted[0]?.price;
   const firstImage = sorted.find((p) => p.image)?.image;
+  const saleSummary = getGroupSaleSummary(sorted);
   const detailHref = `/product?g_id=${group.group_id}`;
 
   return (
@@ -25,7 +27,16 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
         aria-label={`Детали за ${group.group_name}`}
         className="block rounded-t-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <div className="flex h-48 items-center justify-center overflow-hidden bg-muted/30 p-4">
+        <div className="relative flex h-48 items-center justify-center overflow-hidden rounded-t-xl bg-muted/30 p-4">
+          {saleSummary && (
+            <span
+              className="absolute left-2.5 top-2.5 z-10 inline-flex items-center gap-1 rounded-full bg-sale px-2.5 py-0.5 text-xs font-bold tabular-nums text-sale-foreground shadow-sm"
+              aria-label={`На акција ${saleSummary.label}`}
+            >
+              <Percent className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span>{saleSummary.label}</span>
+            </span>
+          )}
           {firstImage ? (
             <img
               src={firstImage}
@@ -89,6 +100,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
             color: "hsl(var(--muted-foreground))",
           };
           const isBest = product.price === bestPrice && sorted.length > 1;
+          const discountPct = getDiscountPercent(product.price, product.regular_price);
           const cartItem = items.find((item) => item.product.product_id === product.product_id);
           const quantity = cartItem?.quantity || 0;
 
@@ -98,7 +110,7 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
               href={product.link}
               target="_blank"
               rel="noopener noreferrer"
-              className="price-row group/row relative transition-colors hover:bg-muted/50"
+              className="price-row group/row relative gap-2 transition-colors hover:bg-muted/50"
             >
               <div className="flex min-w-0 items-center gap-2">
                 <span
@@ -112,12 +124,33 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
                   aria-hidden="true"
                 />
               </div>
-              <div className="flex flex-shrink-0 items-center gap-3">
-                <span
-                  className={`text-sm font-semibold tabular-nums ${isBest ? "price-best" : "text-card-foreground"}`}
-                >
-                  {product.price} ден.
-                </span>
+              <div className="flex flex-shrink-0 items-center gap-2.5">
+                <div className="flex flex-col items-end text-right">
+                  {discountPct !== null && (
+                    <span className="flex items-center gap-1 text-[11px] leading-none tabular-nums">
+                      <span className="rounded bg-sale-soft px-1 py-0.5 font-semibold text-sale-soft-foreground">
+                        -{discountPct}%
+                      </span>
+                      <del
+                        className="text-muted-foreground/80"
+                        aria-label={`Редовна цена ${product.regular_price} ден.`}
+                      >
+                        {product.regular_price} ден.
+                      </del>
+                    </span>
+                  )}
+                  <span
+                    className={`text-sm font-semibold leading-tight tabular-nums ${
+                      isBest
+                        ? "price-best"
+                        : discountPct !== null
+                          ? "text-sale-soft-foreground"
+                          : "text-card-foreground"
+                    }`}
+                  >
+                    {product.price} ден.
+                  </span>
+                </div>
                 <div
                   onClick={(e) => {
                     e.preventDefault();
@@ -162,6 +195,11 @@ const ProductCard = ({ group, showCategory = false }: ProductCardProps) => {
               <div className="pointer-events-none absolute bottom-full left-0 right-0 z-50 mb-1 opacity-0 transition-opacity duration-100 group-hover/row:opacity-100">
                 <div className="w-max max-w-[280px] rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md">
                   <p className="font-medium leading-snug">{product.name}</p>
+                  {discountPct !== null && (
+                    <p className="mt-1 font-medium tabular-nums text-sale-soft-foreground">
+                      На акција: -{discountPct}% (редовна {product.regular_price} ден.)
+                    </p>
+                  )}
                   {product.singular_price && (
                     <p className="mt-1 text-muted-foreground">Ед. цена: {product.singular_price}</p>
                   )}
