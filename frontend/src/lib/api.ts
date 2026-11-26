@@ -74,15 +74,20 @@ export interface ProductDetail {
   };
 }
 
+export type SortBy = "name" | "price" | "discount" | "markets";
+export type SortDir = "asc" | "desc";
+
 export async function fetchProducts(
   mainCategory: string,
   subCategory: string,
   page = 1,
-  perPage: 12 | 24 | 36 = 12,
+  perPage: 12 | 24 | 36 = 24,
   markets: string[] = [],
-  onSale = false
+  onSale = false,
+  sort: SortBy = "name",
+  order: SortDir = "asc"
 ): Promise<ProductsResponse> {
-  let url = `${API_BASE}/${encodeURIComponent(mainCategory)}/${encodeURIComponent(subCategory)}?page=${page}&per_page=${perPage}`;
+  let url = `${API_BASE}/${encodeURIComponent(mainCategory)}/${encodeURIComponent(subCategory)}?page=${page}&per_page=${perPage}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}`;
   for (const m of markets) {
     url += `&market=${encodeURIComponent(m)}`;
   }
@@ -126,12 +131,14 @@ export interface ManufacturerListing {
 export async function fetchManufacturer(
   manufacturerName: string,
   page = 1,
-  perPage: 12 | 24 | 36 = 12,
+  perPage: 12 | 24 | 36 = 24,
   subCategories: string[] = [],
   markets: string[] = [],
-  onSale = false
+  onSale = false,
+  sort: SortBy = "name",
+  order: SortDir = "asc"
 ): Promise<ManufacturerListing> {
-  let url = `${API_BASE}/manufacturer?manufacturer_name=${encodeURIComponent(manufacturerName)}&page=${page}&per_page=${perPage}`;
+  let url = `${API_BASE}/manufacturer?manufacturer_name=${encodeURIComponent(manufacturerName)}&page=${page}&per_page=${perPage}&sort=${encodeURIComponent(sort)}&order=${encodeURIComponent(order)}`;
   for (const sc of subCategories) {
     url += `&sub_category=${encodeURIComponent(sc)}`;
   }

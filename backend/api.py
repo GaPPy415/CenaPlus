@@ -88,6 +88,54 @@ class PerPage(int, Enum):
     thirty_six = 36
 
 
+class SortBy(str, Enum):
+    name = "name"
+    price = "price"
+    discount = "discount"
+    markets = "markets"
+
+
+class SortDir(str, Enum):
+    asc = "asc"
+    desc = "desc"
+
+
+_DEFAULT_SORT_DIR: dict[SortBy, SortDir] = {
+    SortBy.name: SortDir.asc,
+    SortBy.price: SortDir.asc,
+    SortBy.discount: SortDir.desc,
+    SortBy.markets: SortDir.desc,
+}
+
+_ORDER_BY_SQL: dict[tuple[SortBy, SortDir], str] = {
+    (SortBy.name, SortDir.asc): "group_name ASC",
+    (SortBy.name, SortDir.desc): "group_name DESC",
+    (SortBy.price, SortDir.asc): "min_price ASC NULLS LAST, group_name ASC",
+    (SortBy.price, SortDir.desc): "min_price DESC NULLS LAST, group_name ASC",
+    (SortBy.discount, SortDir.desc): "max_discount_pct DESC NULLS LAST, min_price ASC NULLS LAST, group_name ASC",
+    (SortBy.discount, SortDir.asc): "max_discount_pct ASC NULLS LAST, min_price ASC NULLS LAST, group_name ASC",
+    (SortBy.markets, SortDir.desc): "market_count DESC, min_price ASC NULLS LAST, group_name ASC",
+    (SortBy.markets, SortDir.asc): "market_count ASC, min_price ASC NULLS LAST, group_name ASC",
+}
+
+
+def _resolve_order_by(sort: SortBy | str | object, order: SortDir | str | None | object) -> str:
+    """Resolve (sort, order) to a static ORDER BY clause, tolerating direct Python calls."""
+    sort_raw = getattr(sort, "value", sort)
+    try:
+        sort_by = SortBy(sort_raw) if isinstance(sort_raw, str) else SortBy.name
+    except ValueError:
+        sort_by = SortBy.name
+
+    order_raw = getattr(order, "value", order)
+    try:
+        sort_dir = SortDir(order_raw) if isinstance(order_raw, str) else _DEFAULT_SORT_DIR[sort_by]
+    except ValueError:
+        sort_dir = _DEFAULT_SORT_DIR[sort_by]
+
+    return _ORDER_BY_SQL[(sort_by, sort_dir)]
+
+
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
@@ -247,6 +295,8 @@ def get_manufacturer_products(
     sub_category: list[str] = Query(None),
     market: list[str] = Query(None),
     on_sale: bool = Query(False),
+    sort: SortBy = Query(SortBy.name),
+    order: SortDir | None = Query(None),
 ):
     """All grouped products of one manufacturer, across every category."""
     # `per_page` arrives as the enum through FastAPI, but plain ints are accepted
@@ -258,6 +308,7 @@ def get_manufacturer_products(
     raw_markets = market if isinstance(market, (list, tuple)) else []
     active_markets = [m for m in raw_markets if (m or "").strip()]
     only_on_sale = on_sale is True
+    order_by_sql = _resolve_order_by(sort, order)
 
     with get_cursor() as cur:
         cur.execute(RESOLVE_MANUFACTURER_SQL, (needle, needle))
@@ -305,7 +356,7 @@ def get_manufacturer_products(
                        products
                 FROM grouped_products
                 WHERE {where_sql}
-                ORDER BY group_name
+                ORDER BY {order_by_sql}
                 LIMIT %s OFFSET %s
                 """,
                 (*filter_params, per_page_value, offset),
@@ -437,6 +488,8 @@ def get_grouped_products(
     per_page: PerPage = Query(PerPage.twelve),
     market: list[str] = Query(None),
     on_sale: bool = Query(False),
+    sort: SortBy = Query(SortBy.name),
+    order: SortDir | None = Query(None),
 ):
     if main_category not in CATEGORIES:
         raise HTTPException(404, "Main category not found")
@@ -448,6 +501,7 @@ def get_grouped_products(
     raw_markets = market if isinstance(market, (list, tuple)) else []
     active_markets = [m for m in raw_markets if (m or "").strip()]
     only_on_sale = on_sale is True
+    order_by_sql = _resolve_order_by(sort, order)
 
     where_sql, filter_params = _build_listing_filters(
         ["main_category = %s", "sub_category = %s"],
@@ -461,7 +515,7 @@ def get_grouped_products(
             SELECT group_id, group_name, main_category, sub_category, products
             FROM grouped_products
             WHERE {where_sql}
-            ORDER BY group_name
+            ORDER BY {order_by_sql}
             LIMIT %s OFFSET %s
             """,
             (*filter_params, per_page_value, offset),

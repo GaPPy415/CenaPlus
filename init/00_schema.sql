@@ -264,12 +264,19 @@ SELECT g.id AS group_id,
        g.sub_category,
        g.manufacturer_id,
        array_agg(DISTINCT p.market) AS markets,
+       count(DISTINCT p.market)::int AS market_count,
        min(p.price) AS min_price,
        bool_or(p.regular_price IS NOT NULL) AS on_sale,
        COALESCE(
            array_agg(DISTINCT p.market) FILTER (WHERE p.regular_price IS NOT NULL),
            '{}'::text[]
        ) AS sale_markets,
+       max(
+           CASE
+               WHEN p.regular_price IS NOT NULL AND p.price IS NOT NULL AND p.regular_price > p.price
+               THEN GREATEST(1, LEAST(99, round((1.0 - p.price::numeric / p.regular_price) * 100)::int))
+           END
+       ) AS max_discount_pct,
        json_agg(json_build_object(
            'product_id', p.id,
            'name', p.name,

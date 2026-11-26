@@ -343,6 +343,30 @@ class ApiReadModelTests(unittest.TestCase):
         refreshed = refresh_read_views(self.conn, concurrently=True)
         self.assertEqual(refreshed, ["grouped_products", "manufacturer_stats"])
 
+    def test_sorting_options(self):
+        main_cat = "Дом и домаќинство"
+        sub_cat = "Кујнски прибор и садови"
+
+        price_asc = get_grouped_products(main_cat, sub_cat, page=1, per_page=24, sort="price", order="asc")
+        mins_asc = [min(p["price"] for p in row["products"]) for row in price_asc["data"]]
+        self.assertEqual(mins_asc, sorted(mins_asc))
+
+        price_desc = get_grouped_products(main_cat, sub_cat, page=1, per_page=24, sort="price", order="desc")
+        mins_desc = [min(p["price"] for p in row["products"]) for row in price_desc["data"]]
+        self.assertEqual(mins_desc, sorted(mins_desc, reverse=True))
+
+        mkts_desc = get_manufacturer_products("др еткер", page=1, per_page=24, sort="markets", order="desc")
+        counts_desc = [len({p["market"] for p in row["products"]}) for row in mkts_desc["data"]]
+        self.assertEqual(counts_desc, sorted(counts_desc, reverse=True))
+
+        mkts_asc = get_manufacturer_products("др еткер", page=1, per_page=24, sort="markets", order="asc")
+        counts_asc = [len({p["market"] for p in row["products"]}) for row in mkts_asc["data"]]
+        self.assertEqual(counts_asc, sorted(counts_asc))
+
+        # Discount sort runs cleanly even when few/no rows are on sale
+        disc_desc = get_grouped_products(main_cat, sub_cat, page=1, per_page=12, sort="discount", order="desc")
+        self.assertEqual(disc_desc["total"], price_asc["total"])
+
 
 if __name__ == "__main__":
     unittest.main()
