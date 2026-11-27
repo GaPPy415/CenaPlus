@@ -32,4 +32,4 @@ ENV TZ=Europe/Skopje \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-CMD ["supercronic", "/app/crontab"]
+CMD ["/usr/local/bin/supercronic", "/app/crontab"]
