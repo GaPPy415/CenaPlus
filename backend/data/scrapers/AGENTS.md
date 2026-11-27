@@ -34,6 +34,7 @@ class ExampleScraper(MarketScraper):
             ScrapedProduct(
                 name="Млеко 1л",             # unescaped automatically
                 price=59,                    # whole denars, int
+                regular_price=69,            # optional, kept only when > price (active discount)
                 singular_price="59 ден/л",   # optional, human-readable unit price
                 description="Млечни производи",  # optional, feeds categorization
                 in_stock=True,
@@ -60,11 +61,15 @@ Duplicates are allowed — `fetch()` may return the same name from several pages
 
 ### What the base class does for you
 
-1. `collect()` — html-unescapes/strips names, drops records without a name or price, merges duplicates
+1. `check_reachable()` and `get_source_marker()` — optionally skips scraping when `scraper_state`
+   shows the source hasn't changed (bypass with `force=True` or `CENAPLUS_FORCE_SCRAPE=1`).
+2. `collect()` — html-unescapes/strips names, drops records without a name or price, merges duplicates
    (later record wins on price; optional fields backfill from the earlier record).
-2. Opens one connection and looks up existing UUIDs by `(name, market)`.
-3. Builds the upsert payload with `ETL_loadtime` and `last_updated`.
-4. Upserts, then marks the market's rows missing from this run as out of stock.
+3. Opens one connection and looks up existing UUIDs by `(name, market)`.
+4. Builds the upsert payload with `ETL_loadtime` and `last_updated`.
+5. Upserts, marks the market's rows missing from this run as out of stock, updates `scraper_state`,
+   and refreshes the materialized read views (unless `CENAPLUS_SKIP_VIEW_REFRESH=1` is set by
+   `run_scrapers.py`, which refreshes once at the end).
 
 `run()` returns `0` on success and `1` when `abort_on_empty` fires — `run_scrapers.py` records that as a
 failed scraper.
@@ -88,7 +93,7 @@ while the DB session runs `Etc/UTC` — do not author them with SQL `now()`.
 | Scraper | Market | Method |
 |---------|--------|--------|
 | `Reptil_scraper.py` | Reptil | WooCommerce Store API, `marketonline.mk` (paginated, concurrent) |
-| `Bigshop_scraper_maintenance.py` | BigShop | WooCommerce Store API, `bigshop.mk` (paginated, concurrent) |
+| `Bigshop_scraper_maintenance.py` | BigShop | WooCommerce Store API, `bigshop.mk` (paused — filename skips `*_scraper.py` auto-discovery) |
 | `Zito_scraper.py` | Жито Маркет | proverkanaceni.mk platform, `zito.proverkanaceni.mk`, 94 stores |
 | `Kam_scraper.py` | КАМ | PDF price lists per store, `kam.com.mk` (uses `kam_pdf_utils.py`) |
 | `Ramstore_scraper.py` | Рамстор | HTML per-store pages, 15 stores (`ramstore.com.mk`) + pandas, 3 stores in parallel |
@@ -120,7 +125,7 @@ PHP-warning JSON stripping and single-fetch page 1, shared by `Reptil_scraper.py
 names (`to_cyrillic`), which the other scrapers do not need.
 
 The `market` value written by each scraper must match the key in `MARKET_INFO`
-(`src/lib/categories.ts`) and the `--market-*` Tailwind tokens, otherwise the market filter hides the
+(`frontend/src/lib/categories.ts`) and the `--market-*` Tailwind tokens, otherwise the market filter hides the
 products.
 
 ---
@@ -140,6 +145,8 @@ accepts an optional `table=` for tests.
 python -m backend.data.run_scrapers              # Sequential
 python -m backend.data.run_scrapers --parallel 3 # Parallel (3 workers)
 python -m backend.data.run_scrapers --dry-run    # List only
+python -m backend.data.run_scrapers --force      # Ignore scraper_state freshness markers
+python -m backend.data.run_scrapers --no-refresh # Skip materialized view refresh at end
 ```
 
 Logs → `backend/data/logs/`, summary → `run_summary-*.json`
@@ -152,8 +159,9 @@ Logs → `backend/data/logs/`, summary → `run_summary-*.json`
 - Import sibling scraper utilities unqualified (`from kam_pdf_utils import extract_name_price`), with a
   fallback to the absolute form so `python -m backend.data.scrapers.Kam_scraper` also works.
 - Each scraper must be runnable standalone: do the work under `if __name__ == "__main__":`.
-- A failing scraper does not abort the run; `run_scrapers.py` exits 1 at the end and the summary JSON
-  records per-scraper status. `run_pipeline.py` **does** stop on the first failing stage.
+- A failing scraper does not abort the run; `run_scrapers.py` exits `3` (`PARTIAL_FAILURE_EXIT_CODE`)
+  if some passed and some failed, or `1` if all failed, and records per-scraper status in the summary
+  JSON. `run_pipeline.py` continues past partial scraper failures (`3`) and stops on any other failure.
 
 ---
 
@@ -162,7 +170,7 @@ Logs → `backend/data/logs/`, summary → `run_summary-*.json`
 1. Create `{Market}_scraper.py` in `backend/data/scrapers/`
 2. Subclass `MarketScraper`, set `market`, implement `fetch()` returning `ScrapedProduct`s
 3. Add `if __name__ == "__main__": raise SystemExit({Market}Scraper().run())`
-4. Add the market key to `src/lib/categories.ts` (`MARKET_INFO`) and the Tailwind `--market-*` token
+4. Add the market key to `frontend/src/lib/categories.ts` (`MARKET_INFO`) and the Tailwind `--market-*` token
 5. Verify with `--dry-run`, then `python backend/data/scrapers/{Market}_scraper.py` for a single run
 6. If the site exposes a per-product unit price / category / promo text, map it to `singular_price` /
    `description` so categorization has something to work with
@@ -174,11 +182,20 @@ Auto-discovery finds all `*_scraper.py` files — no registry to update.
 ## Tests
 
 ```bash
-python -m unittest backend.tests.test_scraper_base backend.tests.test_product_timestamps
-# full suite (stdlib unittest, no test runner dependency):
-python -m unittest backend.tests.test_scraper_base backend.tests.test_product_timestamps `
-  backend.tests.test_out_of_stock backend.tests.test_rate_limiter backend.tests.test_categorize_failures `
-  backend.tests.test_kipper_parsing backend.tests.test_ramstore_parallel backend.tests.test_spar_transliteration
+# scraper-focused tests:
+python -m unittest backend.tests.test_scraper_base backend.tests.test_product_timestamps \
+  backend.tests.test_out_of_stock backend.tests.test_kipper_parsing \
+  backend.tests.test_ramstore_parallel backend.tests.test_spar_transliteration \
+  backend.tests.test_woocommerce_platform
+
+# full backend suite (14 modules in backend/tests/):
+python -m unittest backend.tests.test_api_read_model backend.tests.test_categorize_failures \
+  backend.tests.test_extract_features backend.tests.test_kipper_parsing \
+  backend.tests.test_out_of_stock backend.tests.test_pipeline_guards \
+  backend.tests.test_product_name_aliases backend.tests.test_product_timestamps \
+  backend.tests.test_ramstore_parallel backend.tests.test_rate_limiter \
+  backend.tests.test_scraper_base backend.tests.test_smart_grouping \
+  backend.tests.test_spar_transliteration backend.tests.test_woocommerce_platform
 ```
 
 `backend/tests/` uses stdlib `unittest` (pytest is not installed) and has no `__init__.py`, matching the

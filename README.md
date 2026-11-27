@@ -1,14 +1,14 @@
 # 🛒 CenaPlus
 
-**Macedonian grocery price comparison app.** CenaPlus scrapes product data from 12 supermarket chains across North Macedonia, categorizes and groups equivalent products using Google Gemini AI, and presents a React frontend where users can compare prices side-by-side.
+**Macedonian grocery price comparison app.** CenaPlus scrapes product data from 12 supermarket chains across North Macedonia, categorizes and extracts product features using Google Gemini AI, groups equivalent products with a 5-layer non-LLM pipeline, and presents a React frontend where users can compare prices side-by-side.
 
 ---
 
 ## Features
 
 - **Multi-market scraping** — automated scrapers for 12 Macedonian supermarkets (Reptil, BigShop, Жито Маркет, КАМ, Рамстор, Стокомак, Веро, Дим, ЗУР, Елида, Спар, Кипер)
-- **AI-powered categorization** — two-stage classification pipeline using Gemini 3.1 Flash Lite with structured JSON schema enforcement
-- **Deterministic product grouping** — identical manufacturer + name + size + variant, with guarded typo/word-order merging; no per-category similarity thresholds
+- **AI-powered categorization & feature extraction** — two-stage classification and brand/name/quantity extraction using Gemini 3.1 Flash Lite with structured JSON schema enforcement
+- **Non-LLM cross-market grouping** — 5-layer pipeline combining deterministic/IR rules (Layers 1–4) with optional local Ollama `bge-m3` semantic matching (Layer 5)
 - **Fuzzy search** — trigram matching (pg_trgm) over canonical product and manufacturer names, similarity ≥ 0.8
 - **Product detail pages** — every card links to `/product?g_id=…`, showing all markets (in stock and out), manufacturer, size, price spread and short-expiry flags
 - **Manufacturer pages** — the manufacturer chip opens `/manufacturer?manufacturer_name=…`, listing every product from that brand across all categories
@@ -43,7 +43,7 @@
 | Рамстор | Web scraping + pandas (per store page) | `#f78223` |
 | Стокомак | HTML table scraping | `#f8d000` |
 | Веро | HTML price list scraping (threaded) | `#eb1c26` |
-| Дим | AJAX price list on `ceni.zur.mk` | `#a8adb2` |
+| Дим | AJAX price list on `dim.marketceni.mk` (ZUR platform) | `#a8adb2` |
 | ЗУР | AJAX price list on `ceni.zur.mk` | `#f5a600` |
 | Елида | HTML scraping (`proverkanaceni.mk` platform) | `#1b3a74` |
 | Спар | JSON API `api.prod.spar.mk` (Skopje stores) | `#00954a` |
@@ -146,7 +146,8 @@ python -m backend.data.run_scrapers --dry-run      # list scrapers without runni
 | `GET` | `/search?q=...` | Fuzzy search (pg_trgm, similarity ≥ 0.8, ordered by similarity) |
 | `GET` | `/product?g_id=...` | Full product detail: metadata, price stats, every market offer (in and out of stock) |
 | `GET` | `/manufacturer?manufacturer_name=...` | Every grouped product of one manufacturer, across all categories (alias/`merged_into` aware) |
-| `GET` | `/{main_category}/{sub_category}` | Paginated grouped products with optional market filter |
+| `GET` | `/{main_category}` | Paginated grouped products for an entire main category |
+| `GET` | `/{main_category}/{sub_category}` | Paginated grouped products for a subcategory |
 
 **Query parameters for product listing:**
 
@@ -155,6 +156,9 @@ python -m backend.data.run_scrapers --dry-run      # list scrapers without runni
 | `page` | int | 1 | Page number |
 | `per_page` | 12 \| 24 \| 36 | 12 | Items per page |
 | `market` | list[str] | all | Filter by market name(s) |
+| `on_sale` | bool | `false` | Only return products with an active discount |
+| `sort` | `name` \| `price` \| `discount` \| `discount_amount` \| `markets` | `name` | Sort field |
+| `order` | `asc` \| `desc` | depends on `sort` | Sort direction |
 
 ---
 
@@ -178,7 +182,7 @@ CenaPlus/
 │   │   ├── RateLimiter.py            # Async rate limiter for Gemini API
 │   │   ├── run_scrapers.py           # Scraper orchestrator
 │   │   ├── run_pipeline.py           # Full pipeline runner
-│   │   ├── tools/                    # Maintenance CLIs (aliases, manufacturer merges, keys)
+│   │   ├── tools/                    # Maintenance CLIs (aliases, manufacturer merges, keys, view refresh)
 │   │   ├── requirements-data.txt     # Pinned pipeline & scraper dependencies
 │   │   └── scrapers/                 # Market-specific scrapers
 │   └── tests/                        # stdlib unittest suite
@@ -202,15 +206,16 @@ CenaPlus/
 
 ## Database Schema
 
-- **`products`** — all scraped products (name, price, market, categories, extracted features, group assignment)
+- **`products`** — all scraped products (name, price, regular_price, market, categories, extracted features, group assignment)
 - **`groups`** — cross-market product groups, one row per product family
 - **`manufacturers` / `manufacturer_aliases`** — canonical brand names, aliases and `merged_into` chains
 - **`product_name_token_aliases`** — cross-market synonym/abbreviation aliases for grouping
 - **`bge_text_embeddings`** — cached 1024-dim local `bge-m3` vectors for Layer 5 grouping
-- **`grouped_products`** (view) — joins groups with their in-stock products, ordered by price
+- **`scraper_state`** — per-market source freshness markers and last-run metadata
+- **`grouped_products` / `manufacturer_stats` / `category_stats`** (materialized views) — pre-joined read models backing the API, auto-refreshed by scrapers and `group_products.py --apply`
 
 > The complete schema is `init/00_schema.sql` — extensions, all tables, constraints, indexes, the
-> timestamp trigger and the `grouped_products` view. A fresh Docker volume creates it automatically;
+> timestamp trigger and the materialized views. A fresh Docker volume creates it automatically;
 > to recover a dropped database: `createdb products_db && psql -d products_db -f init/00_schema.sql`.
 
 ---

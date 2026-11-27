@@ -16,19 +16,20 @@ Data pipeline orchestration for CenaPlus: scrape → categorize → extract feat
 | `text_utils.py` | Shared `normalize_string()` (lowercase + Cyrillic transliteration + punctuation flattening) and `strip_quantity_tokens()` — used by `backend/api.py`, `extract_features.py`, `grouping_rules.py` |
 | `RateLimiter.py` | Async token-aware rate limiter for Gemini API, tracks RPM/TPM per 60-sec window across subprocesses |
 | `run_scrapers.py` | Orchestrator: auto-discovers `*_scraper.py` files, runs sequential or parallel (ThreadPoolExecutor), writes JSON run summaries to `logs/` |
-| `run_pipeline.py` | Full pipeline runner: `run_scrapers.py` → `categorize_products.py` → `extract_features.py` → `group_products.py --apply` sequentially as subprocesses, stops on first failure |
+| `run_pipeline.py` | Full pipeline runner: `run_scrapers.py --parallel <N> --no-refresh` → `categorize_products.py` → `extract_features.py` → `group_products.py --apply` sequentially as subprocesses; continues past partial scraper failures (`exit 3`), stops on any other failure |
 | `scrapers/` | `scraper_base.py` (`ScrapedProduct` + `MarketScraper`), shared platform bases (`proverkanaceni_platform.py`, `zur_platform.py`, `woocommerce_platform.py`), and 12 market scrapers |
 | `tools/grouping_keys.py` | Maintenance CLI to derive/recompute `product_name_key`, `product_name_sorted`, `variant_key`, `variant` |
 | `tools/manufacturer_merges.py` | Maintenance CLI (`propose`, `--csv`, `--apply`, `--pair`) writing `manufacturers.merged_into` |
 | `tools/product_name_aliases.py` | Maintenance CLI (`--all`, `--report`, `--csv`, `--apply`) for `product_name_token_aliases` |
+| `tools/refresh_views.py` | Maintenance CLI to manually run `refresh_read_views()` (`grouped_products`, `manufacturer_stats`, `category_stats`) |
 
 ## Key Conventions
 
 ### Product timestamps
 - `products.etl_loadtime` is written on INSERT only (first load); `last_updated` moves only when a
-  **scraped** field (`name`, `description`, `price`, `singular_price`, `in_stock`, `image`, `link`,
-  `market`) actually changed. Both are enforced by `db_utils.bulk_upsert_products_table` plus the
-  `products_set_timestamps_trg` trigger in `init/00_schema.sql`.
+  **scraped** field (`name`, `description`, `price`, `regular_price`, `singular_price`, `in_stock`,
+  `image`, `link`, `market`) actually changed. Both are enforced by `db_utils.bulk_upsert_products_table`
+  plus the `products_set_timestamps_trg` trigger in `init/00_schema.sql`.
 - Unchanged re-scrapes write **nothing** (`ON CONFLICT ... WHERE row IS DISTINCT FROM excluded`).
 - Pipeline stages must not touch `etl_loadtime` or `last_updated`. Both are naive `timestamp`
   columns holding Python local time while the DB runs `Etc/UTC` — never author from SQL `now()`.
@@ -48,11 +49,11 @@ Data pipeline orchestration for CenaPlus: scrape → categorize → extract feat
 
 ```bash
 # Full pipeline (both script and module mode work)
-python backend/data/run_pipeline.py
-python -m backend.data.run_pipeline
+python backend/data/run_pipeline.py [--force-scrape]
+python -m backend.data.run_pipeline [--force-scrape]
 
 # Individual stages
-python -m backend.data.run_scrapers [--parallel N] [--dry-run]
+python -m backend.data.run_scrapers [--parallel N] [--dry-run] [--force] [--no-refresh]
 python -m backend.data.categorize_products
 python -m backend.data.extract_features
 python -m backend.data.group_products --dry-run [--no-embeddings] [--warm-cache]
@@ -62,6 +63,7 @@ python -m backend.data.group_products --apply
 python -m backend.data.tools.grouping_keys --dry-run
 python -m backend.data.tools.manufacturer_merges --help
 python -m backend.data.tools.product_name_aliases --all --apply
+python -m backend.data.tools.refresh_views
 ```
 
 ## Requirements Files
