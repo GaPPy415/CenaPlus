@@ -1,0 +1,22 @@
+name: Deploy to Homelab
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-homelab
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Pull latest main and rebuild stack
+        run: |
+          set -euo pipefail
+          cd /home/gappy/CenaPlus
+          git fetch origin main
+          git pull --ff-only origin main
+          docker compose up -d --build

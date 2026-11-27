@@ -1,0 +1,2 @@
+# Run full CenaPlus data pipeline daily at 07:30 Europe/Skopje
+30 7 * * * python -u -m backend.data.run_pipeline

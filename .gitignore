@@ -42,3 +42,4 @@ backend/data/deprecated/
 *.sw?
 .env
 shto.*
+init/*.sql.gz
