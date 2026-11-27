@@ -145,7 +145,7 @@ const SubCategoryView = ({ mainCategory, subCategory }: Props) => {
         onSaleOnly
           ? "Моментално нема производи на акција за избраните филтри."
           : subCategory
-            ? "Нема производи за избраните продавници во оваа поткатегорија."
+            ? "Нема производи за избраните продавници во оваа подкатегорија."
             : "Нема производи за избраните продавници во оваа категорија."
       }
       onResetAllFilters={hasFilters ? resetAllFilters : undefined}

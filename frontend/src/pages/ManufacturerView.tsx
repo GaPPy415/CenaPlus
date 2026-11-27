@@ -323,7 +323,7 @@ const ManufacturerView = () => {
                     }`}
                   >
                     <SlidersHorizontal className="h-4 w-4 text-primary" aria-hidden="true" />
-                    <span>Поткатегории</span>
+                    <span>Подкатегории</span>
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
                         selectedSubs.length > 0
@@ -378,7 +378,7 @@ const ManufacturerView = () => {
           {/* Active subcategory pills when drawer is collapsed */}
           {hasSubFilter && !filtersOpen && activeSubItems.length > 0 && (
             <div
-              aria-label="Активни филтри по поткатегорија"
+              aria-label="Активни филтри по подкатегорија"
               className="mt-3 flex flex-wrap items-center gap-2"
             >
               {activeSubItems.map((item) => {
@@ -418,12 +418,12 @@ const ManufacturerView = () => {
             >
               <div className={`overflow-hidden ${filtersOpen ? "visible" : "invisible"}`}>
                 <section
-                  aria-label="Филтер по поткатегорија"
+                  aria-label="Филтер по подкатегорија"
                   className="rounded-xl border border-border bg-card/70 p-4 shadow-sm"
                 >
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs font-medium text-muted-foreground">
-                      Изберете една или повеќе поткатегории за да ги филтрирате резултатите
+                      Изберете една или повеќе подкатегории за да ги филтрирате резултатите
                     </p>
                     {selectedSubs.length > 0 && (
                       <button

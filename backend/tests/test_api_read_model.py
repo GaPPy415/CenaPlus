@@ -113,7 +113,7 @@ class ApiReadModelTests(unittest.TestCase):
 
         # Non-matching subcategory yields 0 rows without error
         empty = get_manufacturer_products(
-            "др еткер", page=1, per_page=12, sub_category=["Непостоечка::Поткатегорија"]
+            "др еткер", page=1, per_page=12, sub_category=["Непостоечка::Подкатегорија"]
         )
         self.assertEqual(empty["total"], 0)
         self.assertEqual(empty["data"], [])
